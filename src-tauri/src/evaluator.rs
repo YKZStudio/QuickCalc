@@ -238,7 +238,7 @@ fn tokenize(expression: &str) -> Result<Vec<Token>, String> {
             '*' => tokens.push(Token::Star),
             '/' => tokens.push(Token::Slash),
             '%' => tokens.push(Token::Percent),
-            '^' => tokens.push(Token::Power),
+            '^' => tokens.push(Token::Xor),
             '&' => tokens.push(Token::Ampersand),
             '|' => tokens.push(Token::Pipe),
             '~' => tokens.push(Token::Tilde),
@@ -721,8 +721,8 @@ mod tests {
     #[test]
     fn honors_arithmetic_precedence() {
         assert_eq!(evaluate("(2 + 3) * 4").unwrap().0, 20.0);
-        assert_eq!(evaluate("-2 ^ 2").unwrap().0, -4.0);
-        assert_eq!(evaluate("2 ^ 3 ^ 2").unwrap().0, 512.0);
+        assert_eq!(evaluate("-2 ** 2").unwrap().0, -4.0);
+        assert_eq!(evaluate("2 ** 3 ** 2").unwrap().0, 512.0);
     }
 
     #[test]
@@ -741,7 +741,9 @@ mod tests {
     #[test]
     fn evaluates_bitwise_and_base_operations() {
         assert_eq!(evaluate("(0xff & 0b1010) << 2").unwrap().0, 40.0);
+        assert_eq!(evaluate("5 ^ 3").unwrap().0, 6.0);
         assert_eq!(evaluate("5 xor 3").unwrap().0, 6.0);
+        assert_eq!(evaluate("2 ^ 3 ** 2").unwrap().0, 11.0);
         assert_eq!(evaluate("255 -> hex").unwrap().1, "0xff");
     }
 
@@ -760,6 +762,7 @@ mod tests {
     fn rejects_invalid_numeric_operations() {
         assert!(evaluate("1 / 0").is_err());
         assert!(evaluate("1.5 & 1").is_err());
+        assert!(evaluate("1.5 ^ 1").is_err());
         assert!(evaluate("sqrt(-1)").is_err());
     }
 }
