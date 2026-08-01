@@ -8,13 +8,23 @@
       <feDropShadow dx="0" dy="28" stdDeviation="30" flood-color="#1C166A" flood-opacity="0.35"/>
     </filter>
   </defs>
+
   <rect x="56" y="56" width="912" height="912" rx="224" fill="url(#background)"/>
+
   <g filter="url(#shadow)">
     <path d="M282 260h460c40 0 72 32 72 72v360c0 40-32 72-72 72H282c-40 0-72-32-72-72V332c0-40 32-72 72-72Z" fill="#FCFCFF"/>
     <path d="M282 260h460c40 0 72 32 72 72v82H210v-82c0-40 32-72 72-72Z" fill="#ECEAFF"/>
     <circle cx="282" cy="337" r="18" fill="#7166FF"/>
     <circle cx="340" cy="337" r="18" fill="#A7A0FF"/>
-    <path d="M319 517h108M373 463v108M595 475h118M595 550h118M326 644l86 86M412 644l-86 86" fill="none" stroke="#3B2FB8" stroke-width="34" stroke-linecap="round"/>
-    <path d="M596 653h118M655 622v62" fill="none" stroke="#7166FF" stroke-width="34" stroke-linecap="round"/>
+
+    <!-- Operators share a precise 2 × 2 grid: x=370/655, y=520/680. -->
+    <g fill="none" stroke="#3B2FB8" stroke-width="34" stroke-linecap="round">
+      <path d="M316 520h108M370 466v108"/>
+      <path d="M596 486h118M596 554h118"/>
+      <path d="M327 637l86 86M413 637l-86 86"/>
+    </g>
+    <g fill="none" stroke="#7166FF" stroke-width="34" stroke-linecap="round">
+      <path d="M601 680h108M655 626v108"/>
+    </g>
   </g>
 </svg>
