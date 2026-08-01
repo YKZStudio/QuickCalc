@@ -77,16 +77,39 @@ impl<'a> Evaluator<'a> {
 }
 
 fn normalize_expression(expression: &str) -> String {
-    expression
-        .trim()
-        .replace('π', "pi")
-        .replace('×', "*")
-        .replace('÷', "/")
-        .replace('−', "-")
-        .replace('[', "(")
-        .replace('{', "(")
-        .replace(']', ")")
-        .replace('}', ")")
+    let mut normalized = String::with_capacity(expression.len());
+
+    for character in expression.trim().chars() {
+        if character == 'π' {
+            normalized.push_str("pi");
+            continue;
+        }
+
+        let character = match character {
+            '！'..='～' => char::from_u32(character as u32 - 0xfee0).unwrap_or(character),
+            '　' => ' ',
+            '。' => '.',
+            '、' => ',',
+            '【' | '〔' | '〖' | '﹝' => '[',
+            '】' | '〕' | '〗' | '﹞' => ']',
+            '﹙' => '(',
+            '﹚' => ')',
+            '﹛' => '{',
+            '﹜' => '}',
+            '×' | '✕' | '✖' => '*',
+            '÷' => '/',
+            '−' | '–' | '—' => '-',
+            other => other,
+        };
+
+        normalized.push(match character {
+            '[' | '{' => '(',
+            ']' | '}' => ')',
+            other => other,
+        });
+    }
+
+    normalized
 }
 
 fn split_assignment(expression: &str) -> Result<(Option<String>, String), String> {
@@ -706,6 +729,13 @@ mod tests {
     fn evaluates_roots_and_constants() {
         assert_eq!(evaluate("sqrt(81) + root(32, 5)").unwrap().0, 11.0);
         assert!((evaluate("pi * 2").unwrap().0 - std::f64::consts::TAU).abs() < 1e-12);
+    }
+
+    #[test]
+    fn normalizes_chinese_and_full_width_expression_input() {
+        assert_eq!(evaluate("（２＋３）×４").unwrap().0, 20.0);
+        assert_eq!(evaluate("ｍａｘ【１，２】").unwrap().0, 2.0);
+        assert_eq!(evaluate("２５５ －＞ ｈｅｘ").unwrap().1, "0xff");
     }
 
     #[test]
