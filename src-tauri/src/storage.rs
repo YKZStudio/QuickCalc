@@ -19,13 +19,13 @@ impl Storage {
     }
 
     pub fn load_settings(&self) -> Settings {
-        read_json_with_backup(&self.root.join("settings.json"))
+        read_json_with_backup::<Settings>(&self.root.join("settings.json"))
             .unwrap_or_default()
             .normalize()
     }
 
     pub fn load_runtime(&self) -> RuntimeData {
-        read_json_with_backup(&self.root.join("runtime.json"))
+        read_json_with_backup::<RuntimeData>(&self.root.join("runtime.json"))
             .unwrap_or_default()
             .normalize()
     }
