@@ -20,6 +20,7 @@ flowchart TD
 | --- | --- |
 | `src/main.ts` | 输入状态机、双 Enter 交互、历史渲染、剪贴板与焦点事件 |
 | `src/brackets.ts` | 成对括号插入、跳过已有右括号、末尾括号补齐 |
+| `src/input-normalization.ts` | 中文/全角数字、括号、标点和数学符号的前端即时转换 |
 | `src-tauri/src/evaluator.rs` | 词法分析、优先级解析、函数、变量、位运算和进制格式化 |
 | `src-tauri/src/model.rs` | IPC 与持久化数据结构 |
 | `src-tauri/src/storage.rs` | JSON 加载、备份恢复与同步原子替换 |
@@ -29,8 +30,8 @@ flowchart TD
 
 ## 3. 求值管线
 
-1. 前端补齐表达式末尾缺失的括号。
-2. Rust 规范化 Unicode 运算符和三类括号。
+1. 前端在输入法组合完成、粘贴和提交时将中文/全角表达式转为半角形式，再补齐末尾缺失的括号。
+2. Rust 对全角字符、Unicode 运算符和多种括号执行同样的兜底归一化。
 3. 在顶层识别可选赋值与可选 `-> base` 输出格式。
 4. tokenizer 只生成白名单 token，绝不调用 JavaScript `eval` 或系统 shell。
 5. 递归下降解析器按固定优先级求值。
@@ -85,4 +86,3 @@ Tauri 通过 bundle identifier `com.ykzstudio.quickcalc` 解析平台应用数�
 - macOS/Linux 的全局快捷键与自启动需要真实平台回归；Wayland 可能要求桌面门户或用户授权。
 - v0.1 没有变量管理和快捷键编辑界面，但后端数据模型已为设置持久化留出边界。
 - 深层嵌套的显式解析深度限制、任意精度整数/小数和单位换算尚未实现。
-

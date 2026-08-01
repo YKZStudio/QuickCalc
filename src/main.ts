@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { applyBracketKey, completeTrailingBrackets } from "./brackets.ts";
+import { normalizeExpressionInput } from "./input-normalization.ts";
 import "./styles.css";
 
 interface Settings {
@@ -120,6 +121,7 @@ let lastSubmittedExpression = "";
 let lastDisplay: string | null = null;
 let readyToCopy = false;
 let busy = false;
+let composing = false;
 let toastTimer: number | undefined;
 
 function requireElement<T extends Element>(selector: string): T {
@@ -186,6 +188,7 @@ function showTransientStatus(message: string): void {
 }
 
 async function evaluateCurrentExpression(): Promise<void> {
+  normalizeCurrentInput();
   const completed = completeTrailingBrackets(input.value.trim());
   if (!completed || busy) {
     return;
@@ -251,7 +254,33 @@ form.addEventListener("submit", (event) => {
   void evaluateCurrentExpression();
 });
 
+function normalizeCurrentInput(): void {
+  const normalized = normalizeExpressionInput(input.value);
+  if (normalized === input.value) {
+    return;
+  }
+
+  const selectionStart = input.selectionStart;
+  const selectionEnd = input.selectionEnd;
+  input.value = normalized;
+  if (selectionStart !== null && selectionEnd !== null) {
+    input.setSelectionRange(selectionStart, selectionEnd);
+  }
+}
+
+input.addEventListener("compositionstart", () => {
+  composing = true;
+});
+
+input.addEventListener("compositionend", () => {
+  composing = false;
+  normalizeCurrentInput();
+});
+
 input.addEventListener("input", () => {
+  if (!composing) {
+    normalizeCurrentInput();
+  }
   if (input.value.trim() !== lastSubmittedExpression) {
     readyToCopy = false;
   }
@@ -268,7 +297,7 @@ input.addEventListener("keydown", (event) => {
     input.value,
     input.selectionStart ?? input.value.length,
     input.selectionEnd ?? input.value.length,
-    event.key,
+    normalizeExpressionInput(event.key),
   );
   if (!edit) {
     return;

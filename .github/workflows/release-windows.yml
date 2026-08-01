@@ -1,0 +1,70 @@
+name: Release Windows
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-windows-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build and publish Windows x64 installers
+    runs-on: windows-latest
+    timeout-minutes: 45
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Set up Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+
+      - name: Set up Rust
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-pc-windows-msvc
+
+      - name: Cache Rust dependencies
+        uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+
+      - name: Install frontend dependencies
+        run: npm ci
+
+      - name: Verify release tag and versions
+        env:
+          RELEASE_TAG: ${{ github.ref_name }}
+        run: npm run release:check
+
+      - name: Run frontend tests
+        run: npm test
+
+      - name: Build installers and publish GitHub Release
+        uses: tauri-apps/tauri-action@v1
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: QuickCalc ${{ github.ref_name }}
+          releaseBody: |
+            Windows x64 安装包：
+            - NSIS `.exe`：适合普通用户安装
+            - MSI：适合企业部署或系统管理员
+
+            当前构建尚未配置 Windows 代码签名，首次运行可能出现 SmartScreen 提示。
+          generateReleaseNotes: true
+          releaseDraft: false
+          prerelease: ${{ contains(github.ref_name, '-') }}
+          uploadUpdaterJson: false
+          retryAttempts: 2
+          releaseAssetNamePattern: QuickCalc_[version]_windows_x64_[bundle].[ext]
+          args: --ci --target x86_64-pc-windows-msvc --bundles nsis,msi
