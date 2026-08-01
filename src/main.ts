@@ -66,7 +66,7 @@ root.innerHTML = `
             inputmode="text"
             spellcheck="false"
             maxlength="4096"
-            placeholder="输入表达式，例如 2 ^ 10 或 total = 99 * 1.08"
+            placeholder="输入表达式，例如 2 ** 10 或 total = 99 * 1.08"
             aria-describedby="interaction-hint"
           />
         </div>

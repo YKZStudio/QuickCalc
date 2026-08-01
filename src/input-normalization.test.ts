@@ -6,6 +6,7 @@ import { normalizeExpressionInput } from "./input-normalization.ts";
 
 test("normalizes full-width digits, letters, brackets, and operators", () => {
   assert.equal(normalizeExpressionInput("ｍａｘ（１，２）＋３×４"), "max(1,2)+3*4");
+  assert.equal(normalizeExpressionInput("５＾３"), "5^3");
 });
 
 test("normalizes common Chinese bracket and punctuation variants", () => {
