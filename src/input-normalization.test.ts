@@ -13,8 +13,8 @@ test("normalizes common Chinese bracket and punctuation variants", () => {
   assert.equal(normalizeExpressionInput("【２。５＋〔３、４〕】"), "[2.5+[3,4]]");
 });
 
-test("normalizes pasted minus, division, assignment, and conversion symbols", () => {
-  assert.equal(normalizeExpressionInput("ｘ＝２５５－＞ｈｅｘ"), "x=255->hex");
+test("normalizes pasted minus, division, assignment, and conversion suffixes", () => {
+  assert.equal(normalizeExpressionInput("ｘ＝１２３４５．６７８９．ｈｅｘ"), "x=12345.6789.hex");
   assert.equal(normalizeExpressionInput("８÷２—１"), "8/2-1");
 });
 
