@@ -4,6 +4,7 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { applyBracketKey, completeTrailingBrackets } from "./brackets.ts";
 import { createCommandRuntime, type CommandResult } from "./commands.ts";
+import { createI18n } from "./i18n.ts";
 import { normalizeExpressionInput } from "./input-normalization.ts";
 import "./styles.css";
 
@@ -19,7 +20,7 @@ interface HistoryEntry {
   timestampMs: number;
   expression: string;
   result: string;
-  value: number;
+  value: number | null;
 }
 
 interface Snapshot {
@@ -32,14 +33,21 @@ interface Snapshot {
 interface EvaluationResponse {
   expression: string;
   display: string;
-  value: number;
+  value: number | null;
   assignedVariable: string | null;
   historyEntry: HistoryEntry;
 }
 
+const i18n = createI18n();
+document.documentElement.lang = i18n.locale;
+document.querySelector<HTMLMetaElement>('meta[name="description"]')?.setAttribute(
+  "content",
+  i18n.t("metaDescription"),
+);
+
 const root = document.querySelector<HTMLElement>("#app");
 if (!root) {
-  throw new Error("Missing #app root element");
+  throw new Error(i18n.t("rootMissing"));
 }
 
 root.innerHTML = `
@@ -51,13 +59,13 @@ root.innerHTML = `
       </div>
       <div class="title-actions">
         <span id="hotkey-hint" class="key-hint">Ctrl + Shift + Space</span>
-        <button id="quit-button" class="icon-button" type="button" title="退出 QuickCalc" aria-label="退出 QuickCalc">×</button>
+        <button id="quit-button" class="icon-button" type="button" title="${escapeHtml(i18n.t("quitTitle"))}" aria-label="${escapeHtml(i18n.t("quitTitle"))}">×</button>
       </div>
     </header>
 
     <div class="workspace">
       <form id="calculator" class="calculator" autocomplete="off">
-        <label class="sr-only" for="expression">表达式</label>
+        <label class="sr-only" for="expression">${escapeHtml(i18n.t("expressionLabel"))}</label>
         <div class="input-row">
           <span class="prompt" aria-hidden="true">›</span>
           <input
@@ -67,7 +75,7 @@ root.innerHTML = `
             inputmode="text"
             spellcheck="false"
             maxlength="4096"
-            placeholder="输入表达式或 /help，例如 0b1010.oct"
+            placeholder="${escapeHtml(i18n.t("expressionPlaceholder"))}"
             aria-describedby="interaction-hint"
           />
         </div>
@@ -77,24 +85,24 @@ root.innerHTML = `
             <strong id="command-title" class="command-title"></strong>
             <ul id="command-lines" class="command-lines"></ul>
           </div>
-          <span id="status" class="status">等待输入</span>
+          <span id="status" class="status">${escapeHtml(i18n.t("waiting"))}</span>
         </div>
-        <p id="interaction-hint" class="interaction-hint">Enter 计算 · /help 帮助 · 再按 Enter 复制 · Esc 隐藏</p>
+        <p id="interaction-hint" class="interaction-hint">${escapeHtml(i18n.t("interactionHint"))}</p>
       </form>
 
-      <aside class="side-panel" aria-label="最近记录">
+      <aside class="side-panel" aria-label="${escapeHtml(i18n.t("recentHistory"))}">
         <div class="side-heading">
-          <span>最近计算</span>
+          <span>${escapeHtml(i18n.t("recentCalculations"))}</span>
           <span id="history-count" class="count">0 / 50</span>
         </div>
         <ol id="history" class="history"></ol>
-        <div id="empty-history" class="empty-history">计算结果会自动保存在这里</div>
+        <div id="empty-history" class="empty-history">${escapeHtml(i18n.t("emptyHistory"))}</div>
       </aside>
     </div>
 
     <footer class="footer">
-      <span id="variable-summary">pi · e · res</span>
-      <span>本地计算 · 自动保存</span>
+      <span id="variable-summary">pi · e · res · tmstamp · tmlocal · tmutc</span>
+      <span>${escapeHtml(i18n.t("localAutoSave"))}</span>
     </footer>
   </section>
 `;
@@ -113,7 +121,7 @@ const emptyHistory = requireElement<HTMLElement>("#empty-history");
 const hotkeyHint = requireElement<HTMLElement>("#hotkey-hint");
 const variableSummary = requireElement<HTMLElement>("#variable-summary");
 const quitButton = requireElement<HTMLButtonElement>("#quit-button");
-const commandRuntime = createCommandRuntime();
+const commandRuntime = createCommandRuntime(i18n);
 
 let snapshot: Snapshot = {
   settings: {
@@ -136,7 +144,7 @@ let toastTimer: number | undefined;
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
   if (!element) {
-    throw new Error(`Missing required element: ${selector}`);
+    throw new Error(i18n.t("elementMissing", { selector }));
   }
   return element;
 }
@@ -146,7 +154,7 @@ function formatHotkey(hotkey: string): string {
 }
 
 function formatTime(timestampMs: number): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return new Intl.DateTimeFormat(i18n.locale, {
     hour: "2-digit",
     minute: "2-digit",
   }).format(new Date(timestampMs));
@@ -164,7 +172,15 @@ function escapeHtml(value: string): string {
 function renderSnapshot(): void {
   hotkeyHint.textContent = formatHotkey(snapshot.settings.hotkey);
   const variableNames = Object.keys(snapshot.variables).sort();
-  variableSummary.textContent = ["pi", "e", "res", ...variableNames].join(" · ");
+  variableSummary.textContent = [
+    "pi",
+    "e",
+    "res",
+    "tmstamp",
+    "tmlocal",
+    "tmutc",
+    ...variableNames,
+  ].join(" · ");
   historyCount.textContent = `${snapshot.history.length} / ${snapshot.settings.historyLimit}`;
   emptyHistory.hidden = snapshot.history.length > 0;
 
@@ -193,7 +209,7 @@ function showStatus(message: string, kind: "idle" | "success" | "error" = "idle"
 function showTransientStatus(message: string): void {
   window.clearTimeout(toastTimer);
   showStatus(message, "success");
-  toastTimer = window.setTimeout(() => showStatus("结果已就绪", "idle"), 1400);
+  toastTimer = window.setTimeout(() => showStatus(i18n.t("resultReady"), "idle"), 1400);
 }
 
 function showNumericResult(value: string): void {
@@ -214,7 +230,7 @@ function showCommandResult(response: CommandResult): void {
     }),
   );
   showStatus(
-    response.tone === "error" ? "命令未执行" : "命令已执行",
+    i18n.t(response.tone === "error" ? "commandNotExecuted" : "commandExecuted"),
     response.tone === "error" ? "error" : response.tone === "success" ? "success" : "idle",
   );
 }
@@ -226,7 +242,7 @@ async function executeCurrentCommand(command: string): Promise<void> {
 
   busy = true;
   input.disabled = true;
-  showStatus("执行命令中…");
+  showStatus(i18n.t("runningCommand"));
   try {
     const response = await commandRuntime.execute(command);
     if (response) {
@@ -251,25 +267,32 @@ async function evaluateCurrentExpression(): Promise<void> {
   input.value = completed;
   busy = true;
   input.disabled = true;
-  showStatus("计算中…");
+  showStatus(i18n.t("calculating"));
 
   try {
     const response = await invoke<EvaluationResponse>("evaluate_expression", {
       expression: completed,
     });
     showNumericResult(response.display);
-    snapshot.res = response.value;
+    if (response.value !== null) {
+      snapshot.res = response.value;
+    }
     snapshot.history = [
       response.historyEntry,
       ...snapshot.history.filter((item) => item.id !== response.historyEntry.id),
     ].slice(0, snapshot.settings.historyLimit);
-    if (response.assignedVariable) {
+    if (response.assignedVariable && response.value !== null) {
       snapshot.variables[response.assignedVariable] = response.value;
     }
     lastSubmittedExpression = response.expression;
     lastDisplay = response.display;
     readyToCopy = true;
-    showStatus(response.assignedVariable ? `已保存变量 ${response.assignedVariable}` : "结果已就绪", "success");
+    showStatus(
+      response.assignedVariable
+        ? i18n.t("variableSaved", { name: response.assignedVariable })
+        : i18n.t("resultReady"),
+      "success",
+    );
     renderSnapshot();
   } catch (error) {
     lastDisplay = null;
@@ -288,9 +311,9 @@ async function copyLastResult(): Promise<void> {
   }
   try {
     await writeText(lastDisplay);
-    showTransientStatus("已复制到剪贴板");
+    showTransientStatus(i18n.t("copied"));
   } catch (error) {
-    showStatus(`复制失败：${String(error)}`, "error");
+    showStatus(i18n.t("copyFailed", { error: String(error) }), "error");
   }
 }
 
@@ -396,10 +419,10 @@ async function bootstrap(): Promise<void> {
     if (snapshot.history[0]) {
       showNumericResult(snapshot.history[0].result);
     }
-    showStatus("等待输入");
+    showStatus(i18n.t("waiting"));
     input.focus();
   } catch (error) {
-    showStatus(`启动失败：${String(error)}`, "error");
+    showStatus(i18n.t("startupFailed", { error: String(error) }), "error");
   }
 }
 
