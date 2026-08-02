@@ -21,9 +21,11 @@ flowchart TD
 | `src/main.ts` | 输入状态机、双 Enter 交互、历史渲染、剪贴板与焦点事件 |
 | `src/brackets.ts` | 成对括号插入、跳过已有右括号、末尾括号补齐 |
 | `src/input-normalization.ts` | 中文/全角数字、括号、标点和数学符号的前端即时转换 |
+| `src/i18n.ts` | 系统语言解析、前端三语词典、参数插值和英语回退 |
 | `src/commands.ts` | 斜杠命令注册、解析、帮助以及 `/plugin` 管理命令 |
 | `src/plugins.ts` | 插件清单、激活/停用生命周期与插件命令自动注销 |
 | `src-tauri/src/evaluator.rs` | 词法分析、优先级解析、函数、带类型变量、时间/ASCII 转换、位运算和进制格式化 |
+| `src-tauri/src/i18n.rs` | 通过系统区域设置选择 Rust 后端语言并提供本地化消息辅助函数 |
 | `src-tauri/src/model.rs` | IPC 与持久化数据结构 |
 | `src-tauri/src/storage.rs` | JSON 加载、备份恢复与同步原子替换 |
 | `src-tauri/src/app_state.rs` | 线程安全设置和运行状态 |
@@ -45,7 +47,15 @@ flowchart TD
 
 此顺序使“界面已经显示成功，但历史尚未写盘”的窗口尽可能小。为了进一步保证数据库级事务语义，未来可把两个 JSON 文件合并为单一日志或迁移到 SQLite；当前单文件运行状态已经覆盖一次计算的原子性。
 
-## 4. 持久化策略
+## 4. 本地化
+
+前端在模块加载时通过 `navigator.language` 解析系统语言，设置 HTML `lang`，并从严格同构的三语词典生成界面、无障碍标签、状态提示与内置命令文字。动态值通过命名参数插值，避免在业务代码中拼接不可翻译的句子。
+
+Rust 后端通过 `sys-locale` 读取操作系统区域设置，将同一语言选择保存到 `AppState` 和 `Storage`。求值器在统一命令边界翻译解析错误，存储、生命周期与 Tauri 命令错误则在产生位置本地化。前后端采用相同规则：简体中文区域映射到 `zh-CN`，繁体中文区域映射到 `zh-TW`，其余全部回退到 `en-US`。
+
+当前语言在应用启动时确定，系统语言变化后需要重启。产品名、变量名、表达式关键字和插件命令名属于稳定标识符，不参与翻译。
+
+## 5. 持久化策略
 
 Tauri 通过 bundle identifier `com.ykzstudio.quickcalc` 解析平台应用数据目录。文件布局：
 
@@ -67,7 +77,7 @@ Tauri 通过 bundle identifier `com.ykzstudio.quickcalc` 解析平台应用数�
 
 启动加载优先正式文件，失败后尝试 `.bak`。框架不会在解析失败时覆盖原损坏文件。
 
-## 5. 生命周期与低资源策略
+## 6. 生命周期与低资源策略
 
 - 全局快捷键由原生插件注册，空闲时无需前端定时器。
 - 自启动使用 `--autostart` 参数，主窗口初始不可见，避免登录时闪烁。
@@ -76,7 +86,7 @@ Tauri 通过 bundle identifier `com.ykzstudio.quickcalc` 解析平台应用数�
 - 主窗口固定尺寸、无透明/模糊特效，避免 Windows 额外合成成本。
 - 发布阶段开启 Rust release 优化、LTO 和符号裁剪。
 
-## 6. 安全边界
+## 7. 安全边界
 
 - CSP 默认只允许本地资源。
 - Tauri capability 仅开放前端写剪贴板所需权限。
@@ -85,7 +95,7 @@ Tauri 通过 bundle identifier `com.ykzstudio.quickcalc` 解析平台应用数�
 - 用户变量只保存 `String -> f64` 及受限的值类型元数据，不保存可执行内容。
 - v0.1 插件接口不包含磁盘或网络加载器；只有宿主显式提供的可信插件对象才能激活。
 
-## 7. 已知框架限制
+## 8. 已知框架限制
 
 - 当前容器可验证 TypeScript 构建与前端测试，但正式桌面构建仍需 Rust 工具链和各平台系统依赖。
 - macOS/Linux 的全局快捷键与自启动需要真实平台回归；Wayland 可能要求桌面门户或用户授权。

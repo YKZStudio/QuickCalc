@@ -1,4 +1,5 @@
 import { PluginManager } from "./plugins.ts";
+import { createI18n, type I18n } from "./i18n.ts";
 
 export type CommandTone = "info" | "success" | "error";
 
@@ -31,16 +32,21 @@ export interface CommandRuntime {
 const COMMAND_NAME_PATTERN = /^[a-z][a-z0-9-]*$/;
 
 export class CommandRegistry {
+  readonly #i18n: I18n;
   readonly #commands = new Map<string, CommandDefinition>();
+
+  constructor(i18n = createI18n()) {
+    this.#i18n = i18n;
+  }
 
   register(command: CommandDefinition): () => void {
     const names = [command.name, ...(command.aliases ?? [])].map(normalizeCommandName);
     if (names.some((name) => !COMMAND_NAME_PATTERN.test(name))) {
-      throw new Error("命令名必须以字母开头，并且只能包含字母、数字或连字符");
+      throw new Error(this.#i18n.t("commandNameInvalid"));
     }
     for (const name of names) {
       if (this.#commands.has(name)) {
-        throw new Error(`命令 /${name} 已注册`);
+        throw new Error(this.#i18n.t("commandAlreadyRegistered", { name }));
       }
     }
     for (const name of names) {
@@ -74,51 +80,57 @@ export class CommandRegistry {
       return null;
     }
     if (!invocation.name) {
-      return errorResult("命令不能为空", ["输入 /help 查看可用命令。"]);
+      return errorResult(this.#i18n.t("commandEmpty"), [this.#i18n.t("helpHint")]);
     }
 
     const command = this.get(invocation.name);
     if (!command) {
-      return errorResult(`未知命令：/${invocation.name}`, ["输入 /help 查看可用命令。"]);
+      return errorResult(this.#i18n.t("unknownCommand", { name: invocation.name }), [
+        this.#i18n.t("helpHint"),
+      ]);
     }
 
     try {
       return await command.execute(invocation);
     } catch (error) {
-      return errorResult(`命令 /${command.name} 执行失败`, [String(error)]);
+      return errorResult(this.#i18n.t("commandExecutionFailed", { name: command.name }), [
+        String(error),
+      ]);
     }
   }
 }
 
-export function createCommandRuntime(): CommandRuntime {
-  const commands = new CommandRegistry();
-  const plugins = new PluginManager(commands);
+export function createCommandRuntime(i18n = createI18n()): CommandRuntime {
+  const commands = new CommandRegistry(i18n);
+  const plugins = new PluginManager(commands, i18n);
 
   commands.register({
     name: "help",
     aliases: ["h"],
-    summary: "显示用法、帮助或指定命令的说明",
-    usage: "/help [命令]",
+    summary: i18n.t("helpSummary"),
+    usage: i18n.t("helpUsage"),
     execute: ({ args }) => {
       const requested = args[0]?.replace(/^\//, "");
       if (requested) {
         const command = commands.get(requested);
         if (!command) {
-          return errorResult(`没有找到命令：/${requested}`, ["输入 /help 查看可用命令。"]);
+          return errorResult(i18n.t("commandNotFound", { name: requested }), [
+            i18n.t("helpHint"),
+          ]);
         }
         return {
           title: `/${command.name}`,
-          lines: [command.summary, `用法：${command.usage}`],
+          lines: [command.summary, i18n.t("usageLine", { usage: command.usage })],
         };
       }
 
       return {
-        title: "QuickCalc 帮助",
+        title: i18n.t("helpTitle"),
         lines: [
-          "表达式：输入表达式后按 Enter 求值；表达式不变时再按 Enter 复制结果。",
-          "进制转换：使用“源表达式.进制”，例如 0b1010.oct、12345.6789.hex。",
-          "时间：tmstamp 为 Unix 秒时间戳；tmlocal 与 tmutc 显示本地时间和 UTC，可保存后相减。",
-          "ASCII：Hello.ascii 转为编码；72 101 108 108 111.tostr 转回字符串。",
+          i18n.t("helpExpression"),
+          i18n.t("helpBaseConversion"),
+          i18n.t("helpTime"),
+          i18n.t("helpAscii"),
           ...commands.list().map((command) => `${command.usage} — ${command.summary}`),
         ],
       };
@@ -128,9 +140,9 @@ export function createCommandRuntime(): CommandRuntime {
   commands.register({
     name: "plugin",
     aliases: ["plugins"],
-    summary: "列出、启用、停用或移除已加载插件",
-    usage: "/plugin [list|enable <id>|disable <id>|remove <id>|help]",
-    execute: ({ args }) => executePluginCommand(plugins, args),
+    summary: i18n.t("pluginSummary"),
+    usage: i18n.t("pluginUsage"),
+    execute: ({ args }) => executePluginCommand(plugins, args, i18n),
   });
 
   return {
@@ -161,17 +173,17 @@ function normalizeCommandName(name: string): string {
   return name.trim().replace(/^\//, "").toLowerCase();
 }
 
-function executePluginCommand(plugins: PluginManager, args: string[]): CommandResult {
+function executePluginCommand(plugins: PluginManager, args: string[], i18n: I18n): CommandResult {
   const action = (args[0] ?? "list").toLowerCase();
   if (action === "help") {
     return {
-      title: "插件管理帮助",
+      title: i18n.t("pluginHelpTitle"),
       lines: [
-        "/plugin list — 列出已加载插件",
-        "/plugin enable <id> — 启用插件",
-        "/plugin disable <id> — 停用插件",
-        "/plugin remove <id> — 移除插件",
-        "插件宿主可通过 QuickCalcPlugin 接口和 PluginManager.install() 接入可信插件。",
+        i18n.t("pluginListHelp"),
+        i18n.t("pluginEnableHelp"),
+        i18n.t("pluginDisableHelp"),
+        i18n.t("pluginRemoveHelp"),
+        i18n.t("pluginHostHelp"),
       ],
     };
   }
@@ -179,26 +191,26 @@ function executePluginCommand(plugins: PluginManager, args: string[]): CommandRe
   if (action === "list") {
     const installed = plugins.list();
     return {
-      title: "插件管理",
+      title: i18n.t("pluginManagementTitle"),
       lines: installed.length
         ? installed.map(
             (plugin) =>
-              `${plugin.id} ${plugin.version} · ${plugin.enabled ? "已启用" : "已停用"} · ${plugin.name}`,
+              `${plugin.id} ${plugin.version} · ${i18n.t(plugin.enabled ? "pluginEnabled" : "pluginDisabled")} · ${plugin.name}`,
           )
-        : ["当前没有已加载插件。", "输入 /plugin help 查看管理命令。"],
+        : [i18n.t("noPlugins"), i18n.t("pluginHelpHint")],
     };
   }
 
   if (!["enable", "disable", "remove"].includes(action)) {
-    return errorResult(`未知插件操作：${action}`, ["输入 /plugin help 查看管理命令。"]);
+    return errorResult(i18n.t("unknownPluginAction", { action }), [i18n.t("pluginHelpHint")]);
   }
 
   const id = args[1];
   if (!id) {
-    return errorResult("缺少插件 ID", [`用法：/plugin ${action} <id>`]);
+    return errorResult(i18n.t("missingPluginId"), [i18n.t("pluginActionUsage", { action })]);
   }
   if (!plugins.get(id)) {
-    return errorResult(`未找到插件：${id}`, ["输入 /plugin list 查看已加载插件。"]);
+    return errorResult(i18n.t("pluginNotFound", { id }), [i18n.t("pluginListHint")]);
   }
 
   const plugin =
@@ -207,9 +219,14 @@ function executePluginCommand(plugins: PluginManager, args: string[]): CommandRe
       : action === "disable"
         ? plugins.disable(id)
         : plugins.uninstall(id);
-  const verb = action === "enable" ? "已启用" : action === "disable" ? "已停用" : "已移除";
+  const titleKey =
+    action === "enable"
+      ? "pluginEnabledTitle"
+      : action === "disable"
+        ? "pluginDisabledTitle"
+        : "pluginRemovedTitle";
   return {
-    title: `${verb}插件`,
+    title: i18n.t(titleKey),
     lines: [`${plugin.id} ${plugin.version} · ${plugin.name}`],
     tone: "success",
   };

@@ -1,4 +1,5 @@
 import type { CommandDefinition, CommandRegistry } from "./commands.ts";
+import { createI18n, type I18n } from "./i18n.ts";
 
 export interface PluginManifest {
   id: string;
@@ -30,17 +31,19 @@ const PLUGIN_ID_PATTERN = /^[a-z][a-z0-9._-]*$/;
 
 export class PluginManager {
   readonly #commands: CommandRegistry;
+  readonly #i18n: I18n;
   readonly #plugins = new Map<string, InstalledPlugin>();
 
-  constructor(commands: CommandRegistry) {
+  constructor(commands: CommandRegistry, i18n = createI18n()) {
     this.#commands = commands;
+    this.#i18n = i18n;
   }
 
   install(plugin: QuickCalcPlugin, enabled = true): PluginSnapshot {
     const id = normalizePluginId(plugin.manifest.id);
-    validateManifest({ ...plugin.manifest, id });
+    validateManifest({ ...plugin.manifest, id }, this.#i18n);
     if (this.#plugins.has(id)) {
-      throw new Error(`插件 ${id} 已安装`);
+      throw new Error(this.#i18n.t("pluginAlreadyInstalled", { id }));
     }
 
     const installed: InstalledPlugin = {
@@ -135,7 +138,7 @@ export class PluginManager {
     const normalized = normalizePluginId(id);
     const installed = this.#plugins.get(normalized);
     if (!installed) {
-      throw new Error(`未找到插件：${normalized || id}`);
+      throw new Error(this.#i18n.t("pluginNotFound", { id: normalized || id }));
     }
     return installed;
   }
@@ -145,12 +148,12 @@ function normalizePluginId(id: string): string {
   return id.trim().toLowerCase();
 }
 
-function validateManifest(manifest: PluginManifest): void {
+function validateManifest(manifest: PluginManifest, i18n = createI18n()): void {
   if (!PLUGIN_ID_PATTERN.test(manifest.id)) {
-    throw new Error("插件 ID 必须以小写字母开头，并且只能包含字母、数字、点、下划线或连字符");
+    throw new Error(i18n.t("pluginIdInvalid"));
   }
   if (!manifest.name.trim() || !manifest.version.trim()) {
-    throw new Error("插件清单必须提供名称和版本");
+    throw new Error(i18n.t("pluginManifestMissing"));
   }
 }
 

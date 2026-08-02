@@ -1,10 +1,12 @@
 mod app_state;
 mod commands;
 mod evaluator;
+mod i18n;
 mod model;
 mod storage;
 
 use app_state::AppState;
+use i18n::{tr, Locale};
 use model::Settings;
 use storage::Storage;
 use tauri::{AppHandle, Manager, WindowEvent};
@@ -32,7 +34,20 @@ fn toggle_main_window(app: &AppHandle) {
             let _ = window.show();
             let _ = window.set_focus();
         }
-        Err(error) => eprintln!("failed to read QuickCalc window visibility: {error}"),
+        Err(error) => {
+            let locale = app
+                .try_state::<AppState>()
+                .map(|state| state.locale)
+                .unwrap_or_else(Locale::system);
+            eprintln!(
+                "{}",
+                tr!(locale;
+                    format!("无法读取 QuickCalc 窗口可见状态：{error}"),
+                    format!("無法讀取 QuickCalc 視窗顯示狀態：{error}"),
+                    format!("Failed to read QuickCalc window visibility: {error}"),
+                )
+            );
+        }
     }
 }
 
@@ -55,8 +70,9 @@ pub fn run() {
         )
         .plugin(tauri_plugin_clipboard_manager::init())
         .setup(|app| {
+            let locale = Locale::system();
             let data_directory = app.path().app_data_dir()?;
-            let storage = Storage::new(data_directory);
+            let storage = Storage::new(data_directory, locale);
             let settings: Settings = storage.load_settings();
             let runtime = storage.load_runtime();
 
@@ -70,19 +86,40 @@ pub fn run() {
 
             let hotkey = settings.hotkey.clone();
             let should_autostart = settings.autostart;
-            app.manage(AppState::new(storage, settings, runtime));
+            app.manage(AppState::new(storage, settings, runtime, locale));
 
             if let Err(error) = app.global_shortcut().register(hotkey.as_str()) {
                 // A shortcut conflict must not prevent the app from starting.
-                eprintln!("failed to register global shortcut {hotkey}: {error}");
+                eprintln!(
+                    "{}",
+                    tr!(locale;
+                        format!("无法注册全局快捷键 {hotkey}：{error}"),
+                        format!("無法註冊全域快速鍵 {hotkey}：{error}"),
+                        format!("Failed to register global shortcut {hotkey}: {error}"),
+                    )
+                );
             }
 
             if should_autostart {
                 if let Err(error) = app.autolaunch().enable() {
-                    eprintln!("failed to enable autostart: {error}");
+                    eprintln!(
+                        "{}",
+                        tr!(locale;
+                            format!("无法启用开机自启动：{error}"),
+                            format!("無法啟用開機自動啟動：{error}"),
+                            format!("Failed to enable autostart: {error}"),
+                        )
+                    );
                 }
             } else if let Err(error) = app.autolaunch().disable() {
-                eprintln!("failed to disable autostart: {error}");
+                eprintln!(
+                    "{}",
+                    tr!(locale;
+                        format!("无法停用开机自启动：{error}"),
+                        format!("無法停用開機自動啟動：{error}"),
+                        format!("Failed to disable autostart: {error}"),
+                    )
+                );
             }
 
             let launched_by_autostart = std::env::args().any(|argument| argument == "--autostart");
@@ -117,5 +154,15 @@ pub fn run() {
             commands::quit_app,
         ])
         .run(tauri::generate_context!())
-        .expect("error while running QuickCalc");
+        .unwrap_or_else(|error| {
+            let locale = Locale::system();
+            panic!(
+                "{}",
+                tr!(locale;
+                    format!("QuickCalc 运行失败：{error}"),
+                    format!("QuickCalc 執行失敗：{error}"),
+                    format!("QuickCalc failed to run: {error}"),
+                )
+            );
+        });
 }

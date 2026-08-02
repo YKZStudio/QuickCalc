@@ -4,6 +4,7 @@ use std::sync::{
 };
 
 use crate::{
+    i18n::Locale,
     model::{RuntimeData, Settings, Snapshot},
     storage::Storage,
 };
@@ -13,15 +14,22 @@ pub struct AppState {
     pub storage: Storage,
     pub settings: Mutex<Settings>,
     pub runtime: Mutex<RuntimeData>,
+    pub locale: Locale,
     sequence: AtomicU64,
 }
 
 impl AppState {
-    pub fn new(storage: Storage, settings: Settings, runtime: RuntimeData) -> Self {
+    pub fn new(
+        storage: Storage,
+        settings: Settings,
+        runtime: RuntimeData,
+        locale: Locale,
+    ) -> Self {
         Self {
             storage,
             settings: Mutex::new(settings),
             runtime: Mutex::new(runtime),
+            locale,
             sequence: AtomicU64::new(0),
         }
     }
@@ -30,12 +38,28 @@ impl AppState {
         let settings = self
             .settings
             .lock()
-            .map_err(|_| "设置状态锁已损坏".to_owned())?
+            .map_err(|_| {
+                self.locale
+                    .text(
+                        "设置状态锁已损坏",
+                        "設定狀態鎖已損壞",
+                        "The settings state lock is corrupted",
+                    )
+                    .to_owned()
+            })?
             .clone();
         let runtime = self
             .runtime
             .lock()
-            .map_err(|_| "运行状态锁已损坏".to_owned())?
+            .map_err(|_| {
+                self.locale
+                    .text(
+                        "运行状态锁已损坏",
+                        "執行階段狀態鎖已損壞",
+                        "The runtime state lock is corrupted",
+                    )
+                    .to_owned()
+            })?
             .clone();
 
         Ok(Snapshot {
@@ -61,15 +85,30 @@ impl AppState {
         let settings = self
             .settings
             .lock()
-            .map_err(|_| "设置状态锁已损坏".to_owned())?
+            .map_err(|_| {
+                self.locale
+                    .text(
+                        "设置状态锁已损坏",
+                        "設定狀態鎖已損壞",
+                        "The settings state lock is corrupted",
+                    )
+                    .to_owned()
+            })?
             .clone();
         let runtime = self
             .runtime
             .lock()
-            .map_err(|_| "运行状态锁已损坏".to_owned())?
+            .map_err(|_| {
+                self.locale
+                    .text(
+                        "运行状态锁已损坏",
+                        "執行階段狀態鎖已損壞",
+                        "The runtime state lock is corrupted",
+                    )
+                    .to_owned()
+            })?
             .clone();
         self.storage.save_settings(&settings)?;
         self.storage.save_runtime(&runtime)
     }
 }
-

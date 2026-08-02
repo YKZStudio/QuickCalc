@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use chrono::{Local, TimeZone, Utc};
 
-use crate::model::{is_builtin, ValueKind};
+use crate::{
+    i18n::Locale,
+    model::{is_builtin, ValueKind},
+};
 
 const MAX_EXPRESSION_CHARS: usize = 4096;
 
@@ -64,6 +67,7 @@ pub struct Evaluator<'a> {
     variable_kinds: &'a HashMap<String, ValueKind>,
     res: f64,
     res_kind: ValueKind,
+    locale: Locale,
 }
 
 impl<'a> Evaluator<'a> {
@@ -72,16 +76,23 @@ impl<'a> Evaluator<'a> {
         variable_kinds: &'a HashMap<String, ValueKind>,
         res: f64,
         res_kind: ValueKind,
+        locale: Locale,
     ) -> Self {
         Self {
             variables,
             variable_kinds,
             res,
             res_kind,
+            locale,
         }
     }
 
     pub fn evaluate(&self, raw_expression: &str) -> Result<EvaluatorOutput, String> {
+        self.evaluate_inner(raw_expression)
+            .map_err(|error| localize_evaluator_error(error, self.locale))
+    }
+
+    fn evaluate_inner(&self, raw_expression: &str) -> Result<EvaluatorOutput, String> {
         if raw_expression.chars().count() > MAX_EXPRESSION_CHARS {
             return Err(format!("表达式不能超过 {MAX_EXPRESSION_CHARS} 个字符"));
         }
@@ -141,6 +152,292 @@ impl<'a> Evaluator<'a> {
             assigned_variable,
         })
     }
+}
+
+fn localize_evaluator_error(message: String, locale: Locale) -> String {
+    if locale == Locale::ZhCn {
+        return message;
+    }
+
+    let translated = |zh_tw: String, en_us: String| match locale {
+        Locale::ZhTw => zh_tw,
+        Locale::EnUs => en_us,
+        Locale::ZhCn => unreachable!("Simplified Chinese returned above"),
+    };
+
+    if let Some(limit) = message
+        .strip_prefix("表达式不能超过 ")
+        .and_then(|rest| rest.strip_suffix(" 个字符"))
+    {
+        return translated(
+            format!("運算式不能超過 {limit} 個字元"),
+            format!("Expression cannot exceed {limit} characters"),
+        );
+    }
+    if let Some(name) = message
+        .strip_prefix("内置变量 ")
+        .and_then(|rest| rest.strip_suffix(" 是只读的"))
+    {
+        return translated(
+            format!("內建變數 {name} 是唯讀的"),
+            format!("Built-in variable {name} is read-only"),
+        );
+    }
+    if let Some(rest) = message.strip_prefix("无法识别第 ") {
+        if let Some((index, character)) = rest.split_once(" 个字符：") {
+            return translated(
+                format!("無法辨識第 {index} 個字元：{character}"),
+                format!("Unrecognized character {index}: {character}"),
+            );
+        }
+    }
+    for (suffix, zh_tw, en_us) in [
+        (
+            " 个字符处的进制数字不完整",
+            " 個字元處的進位數字不完整",
+            " contains an incomplete base-prefixed number",
+        ),
+        (
+            " 个字符处的整数超出 64 位范围",
+            " 個字元處的整數超出 64 位元範圍",
+            " contains an integer outside the 64-bit range",
+        ),
+        (
+            " 个字符处的数字无效",
+            " 個字元處的數字無效",
+            " contains an invalid number",
+        ),
+    ] {
+        if let Some(index) = message
+            .strip_prefix("第 ")
+            .and_then(|rest| rest.strip_suffix(suffix))
+        {
+            return translated(
+                format!("第 {index}{zh_tw}"),
+                format!("Character {index}{en_us}"),
+            );
+        }
+    }
+    if let Some(token) = message.strip_prefix("表达式末尾存在多余内容：") {
+        return translated(
+            format!("運算式結尾有多餘內容：{token}"),
+            format!("Unexpected content at the end of the expression: {token}"),
+        );
+    }
+    if let Some(token) = message.strip_prefix("此处不能使用 ") {
+        return translated(
+            format!("此處不能使用 {token}"),
+            format!("{token} cannot be used here"),
+        );
+    }
+    if let Some(name) = message.strip_prefix("未知变量：") {
+        return translated(
+            format!("未知變數：{name}"),
+            format!("Unknown variable: {name}"),
+        );
+    }
+    if let Some(name) = message.strip_prefix("未知函数：") {
+        return translated(
+            format!("未知函式：{name}"),
+            format!("Unknown function: {name}"),
+        );
+    }
+    if let Some(rest) = message.strip_prefix("函数 ") {
+        if let Some((name, expected)) = rest
+            .split_once(" 需要 ")
+            .and_then(|(name, rest)| rest.strip_suffix(" 个参数").map(|value| (name, value)))
+        {
+            return translated(
+                format!("函式 {name} 需要 {expected} 個參數"),
+                format!("Function {name} requires {expected} arguments"),
+            );
+        }
+        if let Some(name) = rest.strip_suffix(" 至少需要 1 个参数") {
+            return translated(
+                format!("函式 {name} 至少需要 1 個參數"),
+                format!("Function {name} requires at least 1 argument"),
+            );
+        }
+    }
+    if let Some(character) = message
+        .strip_prefix("字符“")
+        .and_then(|rest| rest.strip_suffix("”不属于 ASCII（范围 0–127）"))
+    {
+        return translated(
+            format!("字元「{character}」不屬於 ASCII（範圍 0–127）"),
+            format!("Character '{character}' is not ASCII (range 0–127)"),
+        );
+    }
+    if let Some(code) = message.strip_prefix("无效的 ASCII 编码：") {
+        return translated(
+            format!("無效的 ASCII 編碼：{code}"),
+            format!("Invalid ASCII code: {code}"),
+        );
+    }
+    if let Some(code) = message
+        .strip_prefix("ASCII 编码必须在 0–127 之间：")
+    {
+        return translated(
+            format!("ASCII 編碼必須介於 0–127：{code}"),
+            format!("ASCII code must be between 0 and 127: {code}"),
+        );
+    }
+    if message.ends_with("只接受普通数值") {
+        return locale
+            .text(
+                "此运算只接受普通数值",
+                "此運算只接受一般數值",
+                "This operation only accepts ordinary numeric values",
+            )
+            .to_owned();
+    }
+
+    let translated = match message.as_str() {
+        "字符转换结果不能赋值给数值变量" => locale.text(
+            "字符转换结果不能赋值给数值变量",
+            "字元轉換結果不能指派給數值變數",
+            "Text conversion results cannot be assigned to numeric variables",
+        ),
+        "一次只能进行一个变量赋值" => locale.text(
+            "一次只能进行一个变量赋值",
+            "一次只能進行一個變數指派",
+            "Only one variable assignment is allowed at a time",
+        ),
+        "等号左侧必须是有效变量名" => locale.text(
+            "等号左侧必须是有效变量名",
+            "等號左側必須是有效的變數名稱",
+            "The left side of an equals sign must be a valid variable name",
+        ),
+        "变量赋值缺少右侧表达式" => locale.text(
+            "变量赋值缺少右侧表达式",
+            "變數指派缺少右側運算式",
+            "Variable assignment is missing a right-hand expression",
+        ),
+        "进制转换缺少源表达式" => locale.text(
+            "进制转换缺少源表达式",
+            "進位轉換缺少來源運算式",
+            "Base conversion is missing a source expression",
+        ),
+        "字符转换缺少源内容" => locale.text(
+            "字符转换缺少源内容",
+            "字元轉換缺少來源內容",
+            "Text conversion is missing source content",
+        ),
+        "进制转换请使用“源表达式.进制”，例如 255.hex" => locale.text(
+            "进制转换请使用“源表达式.进制”，例如 255.hex",
+            "進位轉換請使用「來源運算式.進位」，例如 255.hex",
+            "Use expression.base for base conversion, for example 255.hex",
+        ),
+        "不能除以 0" => locale.text("不能除以 0", "不能除以 0", "Cannot divide by zero"),
+        "不能对 0 取模" => locale.text(
+            "不能对 0 取模",
+            "不能對 0 取模",
+            "Cannot take a remainder with zero",
+        ),
+        "时间点不能直接取负值" => locale.text(
+            "时间点不能直接取负值",
+            "時間點不能直接取負值",
+            "A point in time cannot be negated",
+        ),
+        "负数不能求实数平方根" => locale.text(
+            "负数不能求实数平方根",
+            "負數不能求實數平方根",
+            "A negative number has no real square root",
+        ),
+        "缺少右括号" => locale.text("缺少右括号", "缺少右括號", "Missing closing parenthesis"),
+        "表达式不完整" => locale.text("表达式不完整", "運算式不完整", "Incomplete expression"),
+        "函数调用缺少右括号" => locale.text(
+            "函数调用缺少右括号",
+            "函式呼叫缺少右括號",
+            "Function call is missing a closing parenthesis",
+        ),
+        "两个时间点不能相加" => locale.text(
+            "两个时间点不能相加",
+            "兩個時間點不能相加",
+            "Two points in time cannot be added",
+        ),
+        "不支持这些值的加法" => locale.text(
+            "不支持这些值的加法",
+            "不支援這些值的加法",
+            "These values cannot be added",
+        ),
+        "时间点只能减去时间点、秒数或时间差" => locale.text(
+            "时间点只能减去时间点、秒数或时间差",
+            "時間點只能減去時間點、秒數或時間差",
+            "A point in time can only subtract another point in time, seconds, or a duration",
+        ),
+        "根指数不能为 0" => locale.text(
+            "根指数不能为 0",
+            "根指數不能為 0",
+            "The root degree cannot be zero",
+        ),
+        "负数只能求奇数次实数根" => locale.text(
+            "负数只能求奇数次实数根",
+            "負數只能求奇數次實數根",
+            "A negative number only has real roots of odd degree",
+        ),
+        "位运算只接受 64 位整数" => locale.text(
+            "位运算只接受 64 位整数",
+            "位元運算只接受 64 位元整數",
+            "Bitwise operations only accept 64-bit integers",
+        ),
+        "移位量必须在 0 到 63 之间" => locale.text(
+            "移位量必须在 0 到 63 之间",
+            "位移量必須介於 0 到 63",
+            "Shift amount must be between 0 and 63",
+        ),
+        "ASCII 转换的字符串不能为空" => locale.text(
+            "ASCII 转换的字符串不能为空",
+            "ASCII 轉換的字串不能為空",
+            "The string for ASCII conversion cannot be empty",
+        ),
+        "ASCII 转字符缺少编码；多个编码请用空格或逗号分隔" => locale.text(
+            "ASCII 转字符缺少编码；多个编码请用空格或逗号分隔",
+            "ASCII 轉字元缺少編碼；多個編碼請用空格或逗號分隔",
+            "ASCII-to-text conversion requires codes separated by spaces or commas",
+        ),
+        "本地时间超出支持范围" => locale.text(
+            "本地时间超出支持范围",
+            "本機時間超出支援範圍",
+            "Local time is outside the supported range",
+        ),
+        "UTC 时间超出支持范围" => locale.text(
+            "UTC 时间超出支持范围",
+            "UTC 時間超出支援範圍",
+            "UTC time is outside the supported range",
+        ),
+        "时间戳超出支持范围" => locale.text(
+            "时间戳超出支持范围",
+            "時間戳超出支援範圍",
+            "Timestamp is outside the supported range",
+        ),
+        "时间差超出支持范围" => locale.text(
+            "时间差超出支持范围",
+            "時間差超出支援範圍",
+            "Duration is outside the supported range",
+        ),
+        "非十进制输出的整数部分必须在 64 位有符号范围内" => locale.text(
+            "非十进制输出的整数部分必须在 64 位有符号范围内",
+            "非十進位輸出的整數部分必須在 64 位元有號範圍內",
+            "The integer part of non-decimal output must fit in a signed 64-bit range",
+        ),
+        "不支持的进制输出" => locale.text(
+            "不支持的进制输出",
+            "不支援的進位輸出",
+            "Unsupported base output",
+        ),
+        "结果不是有限数值，请检查函数定义域或数值范围" => locale.text(
+            "结果不是有限数值，请检查函数定义域或数值范围",
+            "結果不是有限數值，請檢查函式定義域或數值範圍",
+            "The result is not finite; check the function domain or numeric range",
+        ),
+        _ => {
+            return locale
+                .text("计算失败", "計算失敗", "Calculation failed")
+                .to_owned()
+        }
+    };
+    translated.to_owned()
 }
 
 fn normalize_expression(expression: &str) -> String {
@@ -1049,14 +1346,21 @@ fn ensure_finite(value: f64) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::{Evaluator, EvaluatorOutput};
+    use crate::i18n::Locale;
     use crate::model::ValueKind;
     use std::collections::HashMap;
 
     fn evaluate_output(expression: &str) -> Result<EvaluatorOutput, String> {
         let variables = HashMap::new();
         let variable_kinds = HashMap::new();
-        Evaluator::new(&variables, &variable_kinds, 12.0, ValueKind::Number)
-            .evaluate(expression)
+        Evaluator::new(
+            &variables,
+            &variable_kinds,
+            12.0,
+            ValueKind::Number,
+            Locale::ZhCn,
+        )
+        .evaluate(expression)
     }
 
     fn evaluate(expression: &str) -> Result<(f64, String), String> {
@@ -1109,9 +1413,15 @@ mod tests {
         let mut variables = HashMap::new();
         let variable_kinds = HashMap::new();
         variables.insert("tax".to_owned(), 0.09);
-        let output = Evaluator::new(&variables, &variable_kinds, 12.0, ValueKind::Number)
-            .evaluate("199 * (1 + TAX)")
-            .unwrap();
+        let output = Evaluator::new(
+            &variables,
+            &variable_kinds,
+            12.0,
+            ValueKind::Number,
+            Locale::ZhCn,
+        )
+        .evaluate("199 * (1 + TAX)")
+        .unwrap();
         assert!((output.value.unwrap() - 216.91).abs() < 1e-10);
         assert!(evaluate("pi = 3").unwrap_err().contains("只读"));
         assert!(evaluate("tmstamp = 3").unwrap_err().contains("只读"));
@@ -1145,9 +1455,15 @@ mod tests {
             ("start".to_owned(), ValueKind::UnixTimestamp),
             ("stop".to_owned(), ValueKind::UnixTimestamp),
         ]);
-        let output = Evaluator::new(&variables, &variable_kinds, 0.0, ValueKind::Number)
-            .evaluate("stop - start")
-            .unwrap();
+        let output = Evaluator::new(
+            &variables,
+            &variable_kinds,
+            0.0,
+            ValueKind::Number,
+            Locale::ZhCn,
+        )
+        .evaluate("stop - start")
+        .unwrap();
         assert_eq!(output.value_kind, ValueKind::Duration);
         assert_eq!(output.display, "0000-00-01 01:01:01");
     }
@@ -1162,6 +1478,37 @@ mod tests {
         assert!(evaluate_output("你好.ascii").is_err());
         assert!(evaluate_output("128.tostr").is_err());
         assert!(evaluate_output("message = Hello.ascii").is_err());
+    }
+
+    #[test]
+    fn localizes_errors_and_uses_english_fallback() {
+        let variables = HashMap::new();
+        let variable_kinds = HashMap::new();
+        let traditional = Evaluator::new(
+            &variables,
+            &variable_kinds,
+            0.0,
+            ValueKind::Number,
+            Locale::ZhTw,
+        );
+        assert_eq!(traditional.evaluate("1 / 0").unwrap_err(), "不能除以 0");
+        assert_eq!(
+            traditional.evaluate("missing").unwrap_err(),
+            "未知變數：missing"
+        );
+
+        let english = Evaluator::new(
+            &variables,
+            &variable_kinds,
+            0.0,
+            ValueKind::Number,
+            Locale::EnUs,
+        );
+        assert_eq!(english.evaluate("1 / 0").unwrap_err(), "Cannot divide by zero");
+        assert_eq!(
+            english.evaluate("missing").unwrap_err(),
+            "Unknown variable: missing"
+        );
     }
 
     #[test]
