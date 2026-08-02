@@ -19,7 +19,7 @@ interface HistoryEntry {
   timestampMs: number;
   expression: string;
   result: string;
-  value: number;
+  value: number | null;
 }
 
 interface Snapshot {
@@ -32,7 +32,7 @@ interface Snapshot {
 interface EvaluationResponse {
   expression: string;
   display: string;
-  value: number;
+  value: number | null;
   assignedVariable: string | null;
   historyEntry: HistoryEntry;
 }
@@ -93,7 +93,7 @@ root.innerHTML = `
     </div>
 
     <footer class="footer">
-      <span id="variable-summary">pi · e · res</span>
+      <span id="variable-summary">pi · e · res · tmstamp · tmlocal · tmutc</span>
       <span>本地计算 · 自动保存</span>
     </footer>
   </section>
@@ -164,7 +164,15 @@ function escapeHtml(value: string): string {
 function renderSnapshot(): void {
   hotkeyHint.textContent = formatHotkey(snapshot.settings.hotkey);
   const variableNames = Object.keys(snapshot.variables).sort();
-  variableSummary.textContent = ["pi", "e", "res", ...variableNames].join(" · ");
+  variableSummary.textContent = [
+    "pi",
+    "e",
+    "res",
+    "tmstamp",
+    "tmlocal",
+    "tmutc",
+    ...variableNames,
+  ].join(" · ");
   historyCount.textContent = `${snapshot.history.length} / ${snapshot.settings.historyLimit}`;
   emptyHistory.hidden = snapshot.history.length > 0;
 
@@ -258,12 +266,14 @@ async function evaluateCurrentExpression(): Promise<void> {
       expression: completed,
     });
     showNumericResult(response.display);
-    snapshot.res = response.value;
+    if (response.value !== null) {
+      snapshot.res = response.value;
+    }
     snapshot.history = [
       response.historyEntry,
       ...snapshot.history.filter((item) => item.id !== response.historyEntry.id),
     ].slice(0, snapshot.settings.historyLimit);
-    if (response.assignedVariable) {
+    if (response.assignedVariable && response.value !== null) {
       snapshot.variables[response.assignedVariable] = response.value;
     }
     lastSubmittedExpression = response.expression;

@@ -22,12 +22,24 @@ pub fn evaluate_expression(
         .runtime
         .lock()
         .map_err(|_| "运行状态锁已损坏".to_owned())?;
-    let output = Evaluator::new(&runtime.variables, runtime.res).evaluate(&expression)?;
+    let output = Evaluator::new(
+        &runtime.variables,
+        &runtime.variable_kinds,
+        runtime.res,
+        runtime.res_kind,
+    )
+    .evaluate(&expression)?;
 
-    if let Some(name) = &output.assigned_variable {
-        runtime.variables.insert(name.clone(), output.value);
+    if let Some(value) = output.value {
+        if let Some(name) = &output.assigned_variable {
+            runtime.variables.insert(name.clone(), value);
+            runtime
+                .variable_kinds
+                .insert(name.clone(), output.value_kind);
+        }
+        runtime.res = value;
+        runtime.res_kind = output.value_kind;
     }
-    runtime.res = output.value;
 
     let timestamp_ms = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -73,4 +85,3 @@ pub fn quit_app(app: AppHandle, state: State<'_, AppState>) -> Result<(), String
     app.exit(0);
     Ok(())
 }
-

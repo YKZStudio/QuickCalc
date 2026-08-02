@@ -43,7 +43,19 @@ pub struct HistoryEntry {
     pub timestamp_ms: u64,
     pub expression: String,
     pub result: String,
-    pub value: f64,
+    #[serde(default)]
+    pub value: Option<f64>,
+}
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ValueKind {
+    #[default]
+    Number,
+    UnixTimestamp,
+    LocalDateTime,
+    UtcDateTime,
+    Duration,
 }
 
 #[derive(Debug, Clone, Default, Serialize, Deserialize)]
@@ -51,7 +63,9 @@ pub struct HistoryEntry {
 pub struct RuntimeData {
     pub history: Vec<HistoryEntry>,
     pub variables: HashMap<String, f64>,
+    pub variable_kinds: HashMap<String, ValueKind>,
     pub res: f64,
+    pub res_kind: ValueKind,
 }
 
 impl RuntimeData {
@@ -59,15 +73,22 @@ impl RuntimeData {
         self.history.truncate(HISTORY_LIMIT);
         self.variables
             .retain(|name, value| !is_builtin(name) && value.is_finite());
+        let variables = &self.variables;
+        self.variable_kinds
+            .retain(|name, _| variables.contains_key(name));
         if !self.res.is_finite() {
             self.res = 0.0;
+            self.res_kind = ValueKind::Number;
         }
         self
     }
 }
 
 pub fn is_builtin(name: &str) -> bool {
-    matches!(name.to_ascii_lowercase().as_str(), "pi" | "e" | "res")
+    matches!(
+        name.to_ascii_lowercase().as_str(),
+        "pi" | "e" | "res" | "tmstamp" | "tmlocal" | "tmutc"
+    )
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -84,8 +105,7 @@ pub struct Snapshot {
 pub struct EvaluationResponse {
     pub expression: String,
     pub display: String,
-    pub value: f64,
+    pub value: Option<f64>,
     pub assigned_variable: Option<String>,
     pub history_entry: HistoryEntry,
 }
-

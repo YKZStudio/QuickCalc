@@ -10,6 +10,8 @@ test("ignores calculator expressions and handles built-in help", async () => {
   const help = await runtime.execute("/help");
   assert.equal(help?.title, "QuickCalc 帮助");
   assert.ok(help?.lines.some((line) => line.includes("0b1010.oct")));
+  assert.ok(help?.lines.some((line) => line.includes("tmlocal")));
+  assert.ok(help?.lines.some((line) => line.includes("Hello.ascii")));
   assert.ok(help?.lines.some((line) => line.includes("/plugin")));
 });
 

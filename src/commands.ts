@@ -117,6 +117,8 @@ export function createCommandRuntime(): CommandRuntime {
         lines: [
           "表达式：输入表达式后按 Enter 求值；表达式不变时再按 Enter 复制结果。",
           "进制转换：使用“源表达式.进制”，例如 0b1010.oct、12345.6789.hex。",
+          "时间：tmstamp 为 Unix 秒时间戳；tmlocal 与 tmutc 显示本地时间和 UTC，可保存后相减。",
+          "ASCII：Hello.ascii 转为编码；72 101 108 108 111.tostr 转回字符串。",
           ...commands.list().map((command) => `${command.usage} — ${command.summary}`),
         ],
       };
