@@ -3,6 +3,7 @@ import { getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { applyBracketKey, completeTrailingBrackets } from "./brackets.ts";
+import { createCommandRuntime, type CommandResult } from "./commands.ts";
 import { normalizeExpressionInput } from "./input-normalization.ts";
 import "./styles.css";
 
@@ -66,15 +67,19 @@ root.innerHTML = `
             inputmode="text"
             spellcheck="false"
             maxlength="4096"
-            placeholder="输入表达式，例如 2 ** 10 或 total = 99 * 1.08"
+            placeholder="输入表达式或 /help，例如 0b1010.oct"
             aria-describedby="interaction-hint"
           />
         </div>
         <div id="result-panel" class="result-panel" aria-live="polite">
           <output id="result" class="result">0</output>
+          <div id="command-panel" class="command-panel" hidden>
+            <strong id="command-title" class="command-title"></strong>
+            <ul id="command-lines" class="command-lines"></ul>
+          </div>
           <span id="status" class="status">等待输入</span>
         </div>
-        <p id="interaction-hint" class="interaction-hint">Enter 计算 · 再按 Enter 复制 · Esc 隐藏</p>
+        <p id="interaction-hint" class="interaction-hint">Enter 计算 · /help 帮助 · 再按 Enter 复制 · Esc 隐藏</p>
       </form>
 
       <aside class="side-panel" aria-label="最近记录">
@@ -98,6 +103,9 @@ const form = requireElement<HTMLFormElement>("#calculator");
 const input = requireElement<HTMLInputElement>("#expression");
 const result = requireElement<HTMLOutputElement>("#result");
 const resultPanel = requireElement<HTMLElement>("#result-panel");
+const commandPanel = requireElement<HTMLElement>("#command-panel");
+const commandTitle = requireElement<HTMLElement>("#command-title");
+const commandLines = requireElement<HTMLUListElement>("#command-lines");
 const status = requireElement<HTMLElement>("#status");
 const historyList = requireElement<HTMLOListElement>("#history");
 const historyCount = requireElement<HTMLElement>("#history-count");
@@ -105,6 +113,7 @@ const emptyHistory = requireElement<HTMLElement>("#empty-history");
 const hotkeyHint = requireElement<HTMLElement>("#hotkey-hint");
 const variableSummary = requireElement<HTMLElement>("#variable-summary");
 const quitButton = requireElement<HTMLButtonElement>("#quit-button");
+const commandRuntime = createCommandRuntime();
 
 let snapshot: Snapshot = {
   settings: {
@@ -187,6 +196,51 @@ function showTransientStatus(message: string): void {
   toastTimer = window.setTimeout(() => showStatus("结果已就绪", "idle"), 1400);
 }
 
+function showNumericResult(value: string): void {
+  commandPanel.hidden = true;
+  result.hidden = false;
+  result.value = value;
+}
+
+function showCommandResult(response: CommandResult): void {
+  result.hidden = true;
+  commandPanel.hidden = false;
+  commandTitle.textContent = response.title;
+  commandLines.replaceChildren(
+    ...response.lines.map((line) => {
+      const item = document.createElement("li");
+      item.textContent = line;
+      return item;
+    }),
+  );
+  showStatus(
+    response.tone === "error" ? "命令未执行" : "命令已执行",
+    response.tone === "error" ? "error" : response.tone === "success" ? "success" : "idle",
+  );
+}
+
+async function executeCurrentCommand(command: string): Promise<void> {
+  if (busy) {
+    return;
+  }
+
+  busy = true;
+  input.disabled = true;
+  showStatus("执行命令中…");
+  try {
+    const response = await commandRuntime.execute(command);
+    if (response) {
+      showCommandResult(response);
+    }
+    lastDisplay = null;
+    readyToCopy = false;
+  } finally {
+    busy = false;
+    input.disabled = false;
+    input.focus();
+  }
+}
+
 async function evaluateCurrentExpression(): Promise<void> {
   normalizeCurrentInput();
   const completed = completeTrailingBrackets(input.value.trim());
@@ -203,7 +257,7 @@ async function evaluateCurrentExpression(): Promise<void> {
     const response = await invoke<EvaluationResponse>("evaluate_expression", {
       expression: completed,
     });
-    result.value = response.display;
+    showNumericResult(response.display);
     snapshot.res = response.value;
     snapshot.history = [
       response.historyEntry,
@@ -246,6 +300,11 @@ async function hideWindow(): Promise<void> {
 
 form.addEventListener("submit", (event) => {
   event.preventDefault();
+  const currentInput = input.value.trim();
+  if (currentInput.startsWith("/")) {
+    void executeCurrentCommand(currentInput);
+    return;
+  }
   const unchanged = input.value.trim() === lastSubmittedExpression;
   if (readyToCopy && unchanged) {
     void copyLastResult();
@@ -335,7 +394,7 @@ async function bootstrap(): Promise<void> {
     snapshot = await invoke<Snapshot>("get_snapshot");
     renderSnapshot();
     if (snapshot.history[0]) {
-      result.value = snapshot.history[0].result;
+      showNumericResult(snapshot.history[0].result);
     }
     showStatus("等待输入");
     input.focus();

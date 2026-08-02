@@ -146,38 +146,25 @@ fn split_assignment(expression: &str) -> Result<(Option<String>, String), String
 }
 
 fn split_conversion(expression: &str) -> Result<(String, Option<String>), String> {
-    let bytes = expression.as_bytes();
-    let mut depth = 0_i32;
-    let mut arrow_index = None;
-    let mut index = 0_usize;
+    let expression = expression.trim();
+    let lowercase = expression.to_ascii_lowercase();
 
-    while index < bytes.len() {
-        match bytes[index] {
-            b'(' => depth += 1,
-            b')' => depth -= 1,
-            b'-' if depth == 0 && bytes.get(index + 1) == Some(&b'>') => {
-                if arrow_index.replace(index).is_some() {
-                    return Err("一次只能指定一个进制输出".to_owned());
-                }
-                index += 1;
+    for target in ["bin", "oct", "dec", "hex"] {
+        let suffix = format!(".{target}");
+        if lowercase.ends_with(&suffix) {
+            let numeric_expression = expression[..expression.len() - suffix.len()].trim();
+            if numeric_expression.is_empty() {
+                return Err("进制转换缺少源表达式".to_owned());
             }
-            _ => {}
+            return Ok((numeric_expression.to_owned(), Some(target.to_owned())));
         }
-        index += 1;
     }
 
-    let Some(index) = arrow_index else {
-        return Ok((expression.to_owned(), None));
-    };
-    let target = expression[index + 2..].trim().to_ascii_lowercase();
-    if !matches!(target.as_str(), "bin" | "oct" | "dec" | "hex") {
-        return Err("进制输出只支持 bin、oct、dec 或 hex".to_owned());
+    if expression.contains("->") {
+        return Err("进制转换请使用“源表达式.进制”，例如 255.hex".to_owned());
     }
-    let numeric_expression = expression[..index].trim();
-    if numeric_expression.is_empty() {
-        return Err("进制转换缺少表达式".to_owned());
-    }
-    Ok((numeric_expression.to_owned(), Some(target)))
+
+    Ok((expression.to_owned(), None))
 }
 
 fn is_valid_identifier(name: &str) -> bool {
@@ -645,7 +632,7 @@ fn as_i64(value: f64) -> Result<i64, String> {
         || value.fract() != 0.0
         || !(LOWER_BOUND..UPPER_BOUND_EXCLUSIVE).contains(&value)
     {
-        return Err("位运算和非十进制输出只接受 64 位整数".to_owned());
+        return Err("位运算只接受 64 位整数".to_owned());
     }
     Ok(value as i64)
 }
@@ -662,15 +649,64 @@ fn format_in_base(value: f64, base: &str) -> Result<String, String> {
     if base == "dec" {
         return Ok(format_number(value));
     }
-    let integer = as_i64(value)?;
-    let sign = if integer < 0 { "-" } else { "" };
-    let magnitude = integer.unsigned_abs();
-    match base {
-        "bin" => Ok(format!("{sign}0b{magnitude:b}")),
-        "oct" => Ok(format!("{sign}0o{magnitude:o}")),
-        "hex" => Ok(format!("{sign}0x{magnitude:x}")),
-        _ => Err("不支持的进制输出".to_owned()),
+
+    const LOWER_BOUND: f64 = -9_223_372_036_854_775_808.0;
+    const UPPER_BOUND_EXCLUSIVE: f64 = 9_223_372_036_854_775_808.0;
+    if !value.is_finite() || !(LOWER_BOUND..UPPER_BOUND_EXCLUSIVE).contains(&value) {
+        return Err("非十进制输出的整数部分必须在 64 位有符号范围内".to_owned());
     }
+
+    let (radix, prefix, max_fraction_digits) = match base {
+        "bin" => (2_u32, "0b", 1_074_usize),
+        "oct" => (8_u32, "0o", 358_usize),
+        "hex" => (16_u32, "0x", 269_usize),
+        _ => return Err("不支持的进制输出".to_owned()),
+    };
+    let sign = if value.is_sign_negative() && value != 0.0 {
+        "-"
+    } else {
+        ""
+    };
+    let magnitude = value.abs();
+    let integer = magnitude.trunc() as u64;
+    let integer_digits = format_unsigned(integer, radix);
+    let fraction_digits = format_fraction(magnitude.fract(), radix, max_fraction_digits);
+
+    if fraction_digits.is_empty() {
+        Ok(format!("{sign}{prefix}{integer_digits}"))
+    } else {
+        Ok(format!(
+            "{sign}{prefix}{integer_digits}.{fraction_digits}"
+        ))
+    }
+}
+
+fn format_unsigned(mut value: u64, radix: u32) -> String {
+    if value == 0 {
+        return "0".to_owned();
+    }
+
+    let mut digits = Vec::new();
+    while value > 0 {
+        let digit = (value % u64::from(radix)) as u32;
+        digits.push(char::from_digit(digit, radix).expect("radix is at most hexadecimal"));
+        value /= u64::from(radix);
+    }
+    digits.into_iter().rev().collect()
+}
+
+fn format_fraction(mut fraction: f64, radix: u32, max_digits: usize) -> String {
+    let mut digits = String::new();
+    for _ in 0..max_digits {
+        if fraction == 0.0 {
+            break;
+        }
+        fraction *= f64::from(radix);
+        let digit = fraction.floor() as u32;
+        digits.push(char::from_digit(digit, radix).expect("radix is at most hexadecimal"));
+        fraction -= f64::from(digit);
+    }
+    digits
 }
 
 fn format_number(value: f64) -> String {
@@ -735,7 +771,7 @@ mod tests {
     fn normalizes_chinese_and_full_width_expression_input() {
         assert_eq!(evaluate("（２＋３）×４").unwrap().0, 20.0);
         assert_eq!(evaluate("ｍａｘ【１，２】").unwrap().0, 2.0);
-        assert_eq!(evaluate("２５５ －＞ ｈｅｘ").unwrap().1, "0xff");
+        assert_eq!(evaluate("２５５．ｈｅｘ").unwrap().1, "0xff");
     }
 
     #[test]
@@ -744,7 +780,14 @@ mod tests {
         assert_eq!(evaluate("5 ^ 3").unwrap().0, 6.0);
         assert_eq!(evaluate("5 xor 3").unwrap().0, 6.0);
         assert_eq!(evaluate("2 ^ 3 ** 2").unwrap().0, 11.0);
-        assert_eq!(evaluate("255 -> hex").unwrap().1, "0xff");
+        assert_eq!(evaluate("0b1010.oct").unwrap().1, "0o12");
+        assert_eq!(evaluate("255.hex").unwrap().1, "0xff");
+        assert_eq!(evaluate("10.25.bin").unwrap().1, "0b1010.01");
+        assert_eq!(
+            evaluate("12345.6789.hex").unwrap().1,
+            "0x3039.adcc63f142"
+        );
+        assert!(evaluate("255 -> hex").is_err());
     }
 
     #[test]

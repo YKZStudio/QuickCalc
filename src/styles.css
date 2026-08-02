@@ -1,6 +1,7 @@
 :root {
   color: #e8edf8;
   background: #0b1020;
+  --font-mono: ui-monospace, "Cascadia Code", "SFMono-Regular", Consolas, "Liberation Mono", monospace;
   font-family:
     Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
   font-synthesis: none;
@@ -90,7 +91,7 @@ button {
   border-radius: 6px;
   color: #8791a9;
   background: rgb(255 255 255 / 3%);
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 10px;
 }
 
@@ -148,7 +149,7 @@ button {
   outline: 0;
   color: #f5f7ff;
   background: transparent;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: 19px;
   caret-color: #9babff;
   user-select: text;
@@ -169,13 +170,37 @@ button {
 .result {
   overflow: hidden;
   color: #f7f8ff;
-  font-family: "SFMono-Regular", Consolas, "Liberation Mono", monospace;
+  font-family: var(--font-mono);
   font-size: clamp(30px, 5vw, 48px);
   font-weight: 650;
   line-height: 1.18;
   text-overflow: ellipsis;
   white-space: nowrap;
   user-select: text;
+}
+
+.command-panel {
+  max-height: 166px;
+  overflow-y: auto;
+  color: #dce2f2;
+  font-family: var(--font-mono);
+  user-select: text;
+}
+
+.command-title {
+  color: #f7f8ff;
+  font-size: 15px;
+}
+
+.command-lines {
+  display: grid;
+  margin: 9px 0 0;
+  padding: 0;
+  gap: 5px;
+  color: #9ca6bd;
+  font-size: 11px;
+  line-height: 1.45;
+  list-style: none;
 }
 
 .status {
@@ -263,7 +288,7 @@ button {
 .history-expression,
 .history-result {
   overflow: hidden;
-  font-family: "SFMono-Regular", Consolas, monospace;
+  font-family: var(--font-mono);
   text-overflow: ellipsis;
   white-space: nowrap;
 }
