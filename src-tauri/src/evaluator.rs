@@ -1,5 +1,9 @@
 use std::collections::HashMap;
 
+use base64::{
+    engine::general_purpose::{STANDARD, STANDARD_NO_PAD},
+    Engine as _,
+};
 use chrono::{Local, TimeZone, Utc};
 
 use crate::{
@@ -59,6 +63,7 @@ impl Value {
 enum Conversion {
     Base(String),
     Ascii,
+    Base64,
     ToString,
 }
 
@@ -98,24 +103,21 @@ impl<'a> Evaluator<'a> {
         }
 
         let normalized = normalize_expression(raw_expression);
-        let (assigned_variable, right_hand_side) = split_assignment(&normalized)?;
-        if let Some(name) = &assigned_variable {
-            if is_builtin(name) {
-                return Err(format!("内置变量 {name} 是只读的"));
-            }
-        }
-
-        let (numeric_expression, conversion) = split_conversion(&right_hand_side)?;
+        let (conversion_source, conversion) = split_conversion(&normalized)?;
         if matches!(
             conversion.as_ref(),
-            Some(Conversion::Ascii | Conversion::ToString)
+            Some(Conversion::Ascii | Conversion::Base64 | Conversion::ToString)
         ) {
-            if assigned_variable.is_some() {
+            let text_conversion = conversion
+                .as_ref()
+                .expect("text conversion was checked above");
+            if is_text_assignment(&conversion_source, text_conversion) {
                 return Err("字符转换结果不能赋值给数值变量".to_owned());
             }
-            let display = match conversion {
-                Some(Conversion::Ascii) => convert_to_ascii_codes(&numeric_expression)?,
-                Some(Conversion::ToString) => convert_ascii_codes_to_string(&numeric_expression)?,
+            let display = match text_conversion {
+                Conversion::Ascii => convert_to_ascii_codes(&conversion_source)?,
+                Conversion::Base64 => convert_to_base64(&conversion_source),
+                Conversion::ToString => convert_to_string(&conversion_source)?,
                 _ => unreachable!("conversion was checked above"),
             };
             return Ok(EvaluatorOutput {
@@ -124,6 +126,13 @@ impl<'a> Evaluator<'a> {
                 display,
                 assigned_variable: None,
             });
+        }
+
+        let (assigned_variable, numeric_expression) = split_assignment(&conversion_source)?;
+        if let Some(name) = &assigned_variable {
+            if is_builtin(name) {
+                return Err(format!("内置变量 {name} 是只读的"));
+            }
         }
 
         let tokens = tokenize(&numeric_expression)?;
@@ -139,7 +148,7 @@ impl<'a> Evaluator<'a> {
 
         let display = match conversion.as_ref() {
             Some(Conversion::Base(base)) => format_in_base(value.number, base)?,
-            Some(Conversion::Ascii | Conversion::ToString) => {
+            Some(Conversion::Ascii | Conversion::Base64 | Conversion::ToString) => {
                 unreachable!("text conversions returned above")
             }
             None => format_value(value)?,
@@ -274,9 +283,7 @@ fn localize_evaluator_error(message: String, locale: Locale) -> String {
             format!("Invalid ASCII code: {code}"),
         );
     }
-    if let Some(code) = message
-        .strip_prefix("ASCII 编码必须在 0–127 之间：")
-    {
+    if let Some(code) = message.strip_prefix("ASCII 编码必须在 0–127 之间：") {
         return translated(
             format!("ASCII 編碼必須介於 0–127：{code}"),
             format!("ASCII code must be between 0 and 127: {code}"),
@@ -345,7 +352,9 @@ fn localize_evaluator_error(message: String, locale: Locale) -> String {
             "A negative number has no real square root",
         ),
         "缺少右括号" => locale.text("缺少右括号", "缺少右括號", "Missing closing parenthesis"),
-        "表达式不完整" => locale.text("表达式不完整", "運算式不完整", "Incomplete expression"),
+        "表达式不完整" => {
+            locale.text("表达式不完整", "運算式不完整", "Incomplete expression")
+        }
         "函数调用缺少右括号" => locale.text(
             "函数调用缺少右括号",
             "函式呼叫缺少右括號",
@@ -395,6 +404,16 @@ fn localize_evaluator_error(message: String, locale: Locale) -> String {
             "ASCII 转字符缺少编码；多个编码请用空格或逗号分隔",
             "ASCII 轉字元缺少編碼；多個編碼請用空格或逗號分隔",
             "ASCII-to-text conversion requires codes separated by spaces or commas",
+        ),
+        "无效的 Base64 数据" => locale.text(
+            "无效的 Base64 数据",
+            "無效的 Base64 資料",
+            "Invalid Base64 data",
+        ),
+        "Base64 解码结果不是有效的 UTF-8 文本" => locale.text(
+            "Base64 解码结果不是有效的 UTF-8 文本",
+            "Base64 解碼結果不是有效的 UTF-8 文字",
+            "The Base64 result is not valid UTF-8 text",
         ),
         "本地时间超出支持范围" => locale.text(
             "本地时间超出支持范围",
@@ -513,7 +532,7 @@ fn split_conversion(expression: &str) -> Result<(String, Option<Conversion>), St
     let expression = expression.trim();
     let lowercase = expression.to_ascii_lowercase();
 
-    for target in ["bin", "oct", "dec", "hex"] {
+    for target in ["bin", "oct", "dec", "dex", "hex"] {
         let suffix = format!(".{target}");
         if lowercase.ends_with(&suffix) {
             let numeric_expression = expression[..expression.len() - suffix.len()].trim();
@@ -522,13 +541,16 @@ fn split_conversion(expression: &str) -> Result<(String, Option<Conversion>), St
             }
             return Ok((
                 numeric_expression.to_owned(),
-                Some(Conversion::Base(target.to_owned())),
+                Some(Conversion::Base(
+                    if target == "dex" { "dec" } else { target }.to_owned(),
+                )),
             ));
         }
     }
 
     for (target, conversion) in [
         ("ascii", Conversion::Ascii),
+        ("base64", Conversion::Base64),
         ("tostr", Conversion::ToString),
     ] {
         let suffix = format!(".{target}");
@@ -546,6 +568,23 @@ fn split_conversion(expression: &str) -> Result<(String, Option<Conversion>), St
     }
 
     Ok((expression.to_owned(), None))
+}
+
+fn is_text_assignment(source: &str, conversion: &Conversion) -> bool {
+    let Some((left, right)) = source.split_once('=') else {
+        return false;
+    };
+    if !is_valid_identifier(left.trim()) {
+        return false;
+    }
+
+    match conversion {
+        Conversion::ToString => right
+            .chars()
+            .any(|character| character != '=' && !character.is_whitespace()),
+        Conversion::Ascii | Conversion::Base64 => true,
+        Conversion::Base(_) => false,
+    }
 }
 
 fn is_valid_identifier(name: &str) -> bool {
@@ -777,9 +816,7 @@ impl<'a> Parser<'a> {
                 );
             } else if self.consume(&Token::ShiftRight) {
                 let shift = as_shift(require_number(self.parse_additive()?, "移位运算")?)?;
-                left = Value::number(
-                    (as_i64(require_number(left, "移位运算")?)? >> shift) as f64,
-                );
+                left = Value::number((as_i64(require_number(left, "移位运算")?)? >> shift) as f64);
             } else {
                 break;
             }
@@ -807,9 +844,8 @@ impl<'a> Parser<'a> {
         loop {
             if self.consume(&Token::Star) {
                 let right = self.parse_unary()?;
-                left = Value::number(
-                    require_number(left, "乘法")? * require_number(right, "乘法")?,
-                );
+                left =
+                    Value::number(require_number(left, "乘法")? * require_number(right, "乘法")?);
             } else if self.consume(&Token::Slash) {
                 let right = require_number(self.parse_unary()?, "除法")?;
                 if right == 0.0 {
@@ -1006,6 +1042,7 @@ fn add_values(left: Value, right: Value) -> Result<Value, String> {
 }
 
 fn subtract_values(left: Value, right: Value) -> Result<Value, String> {
+    let subtracts_time_points = is_time_point(left.kind) && is_time_point(right.kind);
     let kind = match (left.kind, right.kind) {
         (ValueKind::Number, ValueKind::Number) => ValueKind::Number,
         (ValueKind::Duration, ValueKind::Duration | ValueKind::Number) => ValueKind::Duration,
@@ -1018,9 +1055,29 @@ fn subtract_values(left: Value, right: Value) -> Result<Value, String> {
         _ => return Err("时间点只能减去时间点、秒数或时间差".to_owned()),
     };
     Ok(Value {
-        number: left.number - right.number,
+        number: if subtracts_time_points {
+            wall_clock_seconds(left) - wall_clock_seconds(right)
+        } else {
+            left.number - right.number
+        },
         kind,
     })
+}
+
+fn wall_clock_seconds(value: Value) -> f64 {
+    if value.kind != ValueKind::LocalDateTime {
+        return value.number;
+    }
+
+    let Ok(seconds) = as_timestamp_seconds(value.number) else {
+        return value.number;
+    };
+    let offset = Local
+        .timestamp_opt(seconds, 0)
+        .single()
+        .map(|date_time| date_time.offset().local_minus_utc())
+        .unwrap_or_default();
+    value.number + f64::from(offset)
 }
 
 fn require_number(value: Value, operation: &str) -> Result<f64, String> {
@@ -1069,10 +1126,7 @@ fn evaluate_function(name: &str, arguments: &[f64]) -> Result<f64, String> {
         }
         "max" => {
             require_at_least_one(name, arguments)?;
-            arguments
-                .iter()
-                .copied()
-                .fold(f64::NEG_INFINITY, f64::max)
+            arguments.iter().copied().fold(f64::NEG_INFINITY, f64::max)
         }
         _ => return Err(format!("未知函数：{name}")),
     };
@@ -1181,10 +1235,41 @@ fn convert_ascii_codes_to_string(source: &str) -> Result<String, String> {
     }
 }
 
+fn convert_to_base64(source: &str) -> String {
+    STANDARD.encode(unquote(source.trim()).as_bytes())
+}
+
+fn convert_to_string(source: &str) -> Result<String, String> {
+    let text = unquote(source.trim());
+    if is_ascii_code_sequence(text) {
+        convert_ascii_codes_to_string(text)
+    } else {
+        convert_base64_to_string(text)
+    }
+}
+
+fn is_ascii_code_sequence(source: &str) -> bool {
+    !source.is_empty()
+        && source.chars().all(|character| {
+            character.is_ascii_digit() || character == ',' || character.is_whitespace()
+        })
+}
+
+fn convert_base64_to_string(source: &str) -> Result<String, String> {
+    let decoded = STANDARD
+        .decode(source)
+        .or_else(|_| STANDARD_NO_PAD.decode(source))
+        .map_err(|_| "无效的 Base64 数据".to_owned())?;
+    String::from_utf8(decoded).map_err(|_| "Base64 解码结果不是有效的 UTF-8 文本".to_owned())
+}
+
 fn unquote(source: &str) -> &str {
     if source.len() >= 2 {
         let bytes = source.as_bytes();
-        if matches!((bytes[0], bytes[source.len() - 1]), (b'\'', b'\'') | (b'"', b'"')) {
+        if matches!(
+            (bytes[0], bytes[source.len() - 1]),
+            (b'\'', b'\'') | (b'"', b'"')
+        ) {
             return &source[1..source.len() - 1];
         }
     }
@@ -1276,9 +1361,7 @@ fn format_in_base(value: f64, base: &str) -> Result<String, String> {
     if fraction_digits.is_empty() {
         Ok(format!("{sign}{prefix}{integer_digits}"))
     } else {
-        Ok(format!(
-            "{sign}{prefix}{integer_digits}.{fraction_digits}"
-        ))
+        Ok(format!("{sign}{prefix}{integer_digits}.{fraction_digits}"))
     }
 }
 
@@ -1348,6 +1431,7 @@ mod tests {
     use super::{Evaluator, EvaluatorOutput};
     use crate::i18n::Locale;
     use crate::model::ValueKind;
+    use chrono::Local;
     use std::collections::HashMap;
 
     fn evaluate_output(expression: &str) -> Result<EvaluatorOutput, String> {
@@ -1366,7 +1450,9 @@ mod tests {
     fn evaluate(expression: &str) -> Result<(f64, String), String> {
         evaluate_output(expression).map(|output| {
             (
-                output.value.expect("numeric expression should have a value"),
+                output
+                    .value
+                    .expect("numeric expression should have a value"),
                 output.display,
             )
         })
@@ -1400,11 +1486,9 @@ mod tests {
         assert_eq!(evaluate("2 ^ 3 ** 2").unwrap().0, 11.0);
         assert_eq!(evaluate("0b1010.oct").unwrap().1, "0o12");
         assert_eq!(evaluate("255.hex").unwrap().1, "0xff");
+        assert_eq!(evaluate("255.dex").unwrap().1, "255");
         assert_eq!(evaluate("10.25.bin").unwrap().1, "0b1010.01");
-        assert_eq!(
-            evaluate("12345.6789.hex").unwrap().1,
-            "0x3039.adcc63f142"
-        );
+        assert_eq!(evaluate("12345.6789.hex").unwrap().1, "0x3039.adcc63f142");
         assert!(evaluate("255 -> hex").is_err());
     }
 
@@ -1432,7 +1516,10 @@ mod tests {
         let timestamp = evaluate_output("tmstamp").unwrap();
         assert_eq!(timestamp.value_kind, ValueKind::UnixTimestamp);
         assert!(timestamp.value.unwrap() > 1_000_000_000.0);
-        assert!(timestamp.display.chars().all(|character| character.is_ascii_digit()));
+        assert!(timestamp
+            .display
+            .chars()
+            .all(|character| character.is_ascii_digit()));
 
         for variable in ["tmlocal", "tmutc"] {
             let display = evaluate_output(variable).unwrap().display;
@@ -1442,9 +1529,12 @@ mod tests {
             assert_eq!(&display[13..14], ":");
         }
 
+        let local_offset = Local::now().offset().local_minus_utc();
+        let time_difference = evaluate_output("tmlocal - tmutc").unwrap();
+        assert_eq!(time_difference.value, Some(f64::from(local_offset)));
         assert_eq!(
-            evaluate_output("tmlocal - tmutc").unwrap().display,
-            "0000-00-00 00:00:00"
+            time_difference.display,
+            super::format_duration(f64::from(local_offset)).unwrap()
         );
 
         let variables = HashMap::from([
@@ -1473,11 +1563,28 @@ mod tests {
         let ascii = evaluate_output("Hello.ascii").unwrap();
         assert_eq!(ascii.value, None);
         assert_eq!(ascii.display, "72 101 108 108 111");
-        assert_eq!(evaluate_output("72 101 108 108 111.tostr").unwrap().display, "Hello");
+        assert_eq!(
+            evaluate_output("72 101 108 108 111.tostr").unwrap().display,
+            "Hello"
+        );
         assert_eq!(evaluate_output("65, 66.tostr").unwrap().display, "AB");
         assert!(evaluate_output("你好.ascii").is_err());
         assert!(evaluate_output("128.tostr").is_err());
         assert!(evaluate_output("message = Hello.ascii").is_err());
+    }
+
+    #[test]
+    fn converts_utf8_text_to_and_from_base64() {
+        assert_eq!(evaluate_output("Hello.base64").unwrap().display, "SGVsbG8=");
+        assert_eq!(evaluate_output("\"a=b\".base64").unwrap().display, "YT1i");
+        assert_eq!(evaluate_output("你好.base64").unwrap().display, "5L2g5aW9");
+        assert_eq!(evaluate_output("SGVsbG8=.tostr").unwrap().display, "Hello");
+        assert_eq!(evaluate_output("SGVsbG8.tostr").unwrap().display, "Hello");
+        assert_eq!(evaluate_output("TQ==.tostr").unwrap().display, "M");
+        assert_eq!(evaluate_output("5L2g5aW9.tostr").unwrap().display, "你好");
+        assert!(evaluate_output("not-base64.tostr").is_err());
+        assert!(evaluate_output("message = Hello.base64").is_err());
+        assert!(evaluate_output("message = SGVsbG8=.tostr").is_err());
     }
 
     #[test]
@@ -1504,7 +1611,10 @@ mod tests {
             ValueKind::Number,
             Locale::EnUs,
         );
-        assert_eq!(english.evaluate("1 / 0").unwrap_err(), "Cannot divide by zero");
+        assert_eq!(
+            english.evaluate("1 / 0").unwrap_err(),
+            "Cannot divide by zero"
+        );
         assert_eq!(
             english.evaluate("missing").unwrap_err(),
             "Unknown variable: missing"

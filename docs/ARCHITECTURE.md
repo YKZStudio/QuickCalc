@@ -20,11 +20,12 @@ flowchart TD
 | --- | --- |
 | `src/main.ts` | 输入状态机、双 Enter 交互、历史渲染、剪贴板与焦点事件 |
 | `src/brackets.ts` | 成对括号插入、跳过已有右括号、末尾括号补齐 |
+| `src/completion.ts` | 变量、斜杠命令和点操作候选匹配及文本替换范围计算 |
 | `src/input-normalization.ts` | 中文/全角数字、括号、标点和数学符号的前端即时转换 |
 | `src/i18n.ts` | 系统语言解析、前端三语词典、参数插值和英语回退 |
 | `src/commands.ts` | 斜杠命令注册、解析、帮助以及 `/plugin` 管理命令 |
 | `src/plugins.ts` | 插件清单、激活/停用生命周期与插件命令自动注销 |
-| `src-tauri/src/evaluator.rs` | 词法分析、优先级解析、函数、带类型变量、时间/ASCII 转换、位运算和进制格式化 |
+| `src-tauri/src/evaluator.rs` | 词法分析、优先级解析、函数、带类型变量、时间/ASCII/Base64 转换、位运算和进制格式化 |
 | `src-tauri/src/i18n.rs` | 通过系统区域设置选择 Rust 后端语言并提供本地化消息辅助函数 |
 | `src-tauri/src/model.rs` | IPC 与持久化数据结构 |
 | `src-tauri/src/storage.rs` | JSON 加载、备份恢复与同步原子替换 |
@@ -36,10 +37,10 @@ flowchart TD
 
 1. 前端在输入法组合完成、粘贴和提交时将中文/全角表达式转为半角形式，再补齐末尾缺失的括号。
 2. Rust 对全角字符、Unicode 运算符和多种括号执行同样的兜底归一化。
-3. 在顶层识别可选赋值与末尾 `.bin|.oct|.dec|.hex|.ascii|.tostr` 输出格式；最后一个转换后缀不会与十进制小数点混淆。
+3. 在顶层先识别末尾 `.bin|.oct|.dec|.dex|.hex|.ascii|.base64|.tostr` 输出格式，再处理可选赋值；这一顺序确保 Base64 末尾的 `=` 填充不会被误判为赋值。
 4. tokenizer 只生成白名单 token，绝不调用 JavaScript `eval` 或系统 shell。
 5. 递归下降解析器按固定优先级求值。
-6. 数值求值携带普通数值、Unix 时间戳、本地时间、UTC 时间或时间差类型；校验结果为有限数值，位运算额外校验 `i64` 约束。ASCII 转换走受限文本分支，只接受 0–127。
+6. 数值求值携带普通数值、Unix 时间戳、本地时间、UTC 时间或时间差类型；校验结果为有限数值，位运算额外校验 `i64` 约束。ASCII 与 Base64 走受限文本分支：ASCII 只接受 0–127，Base64 使用 UTF-8 且不进入数值解析器。
 7. 数值结果更新变量、类型元数据与 `res`；纯文本转换不覆盖 `res`。两类结果都写入历史并裁剪到 50 条。
 8. 同步持久化成功后返回 IPC 响应。
 

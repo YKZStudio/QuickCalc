@@ -13,6 +13,7 @@ test("ignores calculator expressions and handles built-in help", async () => {
   assert.ok(help?.lines.some((line) => line.includes("0b1010.oct")));
   assert.ok(help?.lines.some((line) => line.includes("tmlocal")));
   assert.ok(help?.lines.some((line) => line.includes("Hello.ascii")));
+  assert.ok(help?.lines.some((line) => line.includes("base64")));
   assert.ok(help?.lines.some((line) => line.includes("/plugin")));
 });
 

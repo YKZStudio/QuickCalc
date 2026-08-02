@@ -20,18 +20,15 @@ pub fn evaluate_expression(
     state: State<'_, AppState>,
 ) -> Result<EvaluationResponse, String> {
     let locale = state.locale;
-    let mut runtime = state
-        .runtime
-        .lock()
-        .map_err(|_| {
-            locale
-                .text(
-                    "运行状态锁已损坏",
-                    "執行階段狀態鎖已損壞",
-                    "The runtime state lock is corrupted",
-                )
-                .to_owned()
-        })?;
+    let mut runtime = state.runtime.lock().map_err(|_| {
+        locale
+            .text(
+                "运行状态锁已损坏",
+                "執行階段狀態鎖已損壞",
+                "The runtime state lock is corrupted",
+            )
+            .to_owned()
+    })?;
     let output = Evaluator::new(
         &runtime.variables,
         &runtime.variable_kinds,
@@ -98,10 +95,7 @@ pub fn evaluate_expression(
 }
 
 #[tauri::command]
-pub fn hide_main_window(
-    window: WebviewWindow,
-    state: State<'_, AppState>,
-) -> Result<(), String> {
+pub fn hide_main_window(window: WebviewWindow, state: State<'_, AppState>) -> Result<(), String> {
     state.persist_all()?;
     window.hide().map_err(|error| {
         tr!(state.locale;

@@ -48,10 +48,33 @@ jobs:
       - name: Run frontend tests
         run: npm test
 
+      - name: Restore Windows signing certificate
+        shell: pwsh
+        env:
+          WINDOWS_CERTIFICATE_PFX_BASE64: ${{ secrets.WINDOWS_CERTIFICATE_PFX_BASE64 }}
+          QUICKCALC_CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+        run: |
+          if ([string]::IsNullOrWhiteSpace($env:WINDOWS_CERTIFICATE_PFX_BASE64)) {
+            throw "Repository secret WINDOWS_CERTIFICATE_PFX_BASE64 is missing."
+          }
+          if ([string]::IsNullOrWhiteSpace($env:QUICKCALC_CERT_PASSWORD)) {
+            throw "Repository secret WINDOWS_CERTIFICATE_PASSWORD is missing."
+          }
+          $certificateDirectory = Join-Path $env:GITHUB_WORKSPACE "cert"
+          New-Item -ItemType Directory -Force -Path $certificateDirectory | Out-Null
+          $certificatePath = Join-Path $certificateDirectory "cert.pfx"
+          try {
+            $certificateBytes = [Convert]::FromBase64String($env:WINDOWS_CERTIFICATE_PFX_BASE64)
+          } catch {
+            throw "WINDOWS_CERTIFICATE_PFX_BASE64 is not valid Base64."
+          }
+          [IO.File]::WriteAllBytes($certificatePath, $certificateBytes)
+
       - name: Build installers and publish GitHub Release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          QUICKCALC_CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
         with:
           tagName: ${{ github.ref_name }}
           releaseName: QuickCalc ${{ github.ref_name }}
@@ -60,7 +83,8 @@ jobs:
             - NSIS `.exe`：适合普通用户安装
             - MSI：适合企业部署或系统管理员
 
-            当前构建尚未配置 Windows 代码签名，首次运行可能出现 SmartScreen 提示。
+            应用主程序、NSIS 安装程序与 MSI 均使用项目的 Windows 证书进行 Authenticode 签名。
+            当前使用自签名证书；未信任该证书的设备仍可能显示发布者或 SmartScreen 警告。
           generateReleaseNotes: true
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
@@ -68,3 +92,8 @@ jobs:
           retryAttempts: 2
           releaseAssetNamePattern: QuickCalc_[version]_windows_x64_[bundle].[ext]
           args: --ci --target x86_64-pc-windows-msvc --bundles nsis,msi
+
+      - name: Remove temporary signing certificate
+        if: always()
+        shell: pwsh
+        run: Remove-Item -LiteralPath (Join-Path $env:GITHUB_WORKSPACE "cert\cert.pfx") -Force -ErrorAction SilentlyContinue

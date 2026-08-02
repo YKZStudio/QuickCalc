@@ -4,7 +4,7 @@
 
 QuickCalc 是一款以键盘为中心的快速桌面计算器。默认按 `Ctrl + Shift + Space` 呼出，再按一次隐藏；窗口始终置顶、无边框，并在失去焦点时自动隐藏。
 
-项目当前处于 **v0.1 框架阶段**：桌面生命周期、持久化、表达式求值核心、命令系统、插件接口、基础界面和 Windows 安装包自动发布流程已经搭好；代码签名与 Apple/Linux 支持已延后到后续发布阶段。
+项目当前处于 **v0.1 框架阶段**：桌面生命周期、持久化、表达式求值核心、命令系统、插件接口、基础界面和 Windows 安装包自动发布流程已经搭好；Windows 构建支持使用 PFX 自动签名，Apple/Linux 支持延后到后续发布阶段。
 
 ## 设计目标
 
@@ -23,6 +23,8 @@ QuickCalc 是一款以键盘为中心的快速桌面计算器。默认按 `Ctrl 
 - 64 位有符号整数位运算：`&`、`|`、`^`/`xor`、`~`、`<<`、`>>`。
 - 二/八/十/十六进制字面量和输出转换。
 - ASCII 字符串与十进制编码序列互转。
+- UTF-8 文本 Base64 编码，以及 Base64/ASCII 自动识别解码。
+- 变量、斜杠命令和点操作的输入补全。
 - `/help` 命令帮助与 `/plugin` 插件管理入口。
 - 可注册命令的 `QuickCalcPlugin` 插件接口。
 - 用户变量赋值；内置只读变量 `pi`、`e`、`res`、`tmstamp`、`tmlocal`、`tmutc`。
@@ -49,12 +51,16 @@ QuickCalc 是一款以键盘为中心的快速桌面计算器。默认按 `Ctrl 
 | 计算时间差 | `start = tmstamp`，稍后输入 `tmstamp - start` | `0000-00-00 00:01:30` |
 | 字符串转 ASCII | `Hello.ascii` | `72 101 108 108 111` |
 | ASCII 转字符串 | `72 101 108 108 111.tostr` | `Hello` |
+| 字符串转 Base64 | `Hello.base64`、`你好.base64` | `SGVsbG8=`、`5L2g5aW9` |
+| Base64 转字符串 | `SGVsbG8=.tostr` | `Hello` |
 
-进制转换使用“源表达式.进制”后缀，目标支持 `bin`、`oct`、`dec`、`hex`，并支持小数。位运算只接受可表示为 64 位有符号整数的值。`^` 与 `xor` 均表示按位异或；乘方使用 `**` 或 `pow(x, y)`。
+输入 `数据.` 或点操作的前几个字母后会显示补全列表，可用方向键选择、Tab 接受。可补全操作包括 `bin`、`oct`、`dec`、`dex`、`hex`、`ascii`、`base64` 和 `tostr`；`dex` 是十进制输出 `dec` 的兼容别名。
+
+进制转换使用“源表达式.进制”后缀，目标支持 `bin`、`oct`、`dec`/`dex`、`hex`，并支持小数。位运算只接受可表示为 64 位有符号整数的值。`^` 与 `xor` 均表示按位异或；乘方使用 `**` 或 `pow(x, y)`。
 
 `tmstamp`、`tmlocal` 与 `tmutc` 在每次求值时读取同一个当前时刻。把任一时间变量保存到用户变量后，可以与另一个时间点相减；时间差使用 `0000-00-dd hh:mm:ss`，其中年月固定为 `0000-00`，天数可继续增长，从而避免把长度不固定的月份或年份当作固定时长。
 
-ASCII 转换严格使用 0–127：`.ascii` 输出空格分隔的十进制编码，`.tostr` 接受由空格或逗号分隔的一个或多个编码。字符转换产生文本结果，不覆盖数值变量或 `res`。
+ASCII 转换严格使用 0–127：`.ascii` 输出空格分隔的十进制编码。`.base64` 把点号前的文本按 UTF-8 编码为标准 Base64；如文本包含 `=`，可使用引号明确数据边界，例如 `"a=b".base64`。`.tostr` 会自动识别输入：只包含数字、空格或逗号时按 ASCII 编码序列处理，否则按 Base64 解码，并兼容省略末尾填充的 Base64。Base64 解码结果必须是有效 UTF-8。文本转换结果不覆盖数值变量或 `res`。
 
 ## 语言
 
@@ -68,7 +74,7 @@ QuickCalc 启动时读取系统语言并自动选择：
 
 ## 命令与插件
 
-- `/help`：显示表达式、进制转换和命令用法；`/help plugin` 可查看指定命令。
+- `/help`：显示表达式、点操作、Base64/ASCII 转换和命令用法；`/help plugin` 可查看指定命令。
 - `/plugin` 或 `/plugin list`：列出已加载插件。
 - `/plugin enable <id>`、`/plugin disable <id>`、`/plugin remove <id>`：管理已由可信宿主加载的插件。
 
@@ -94,7 +100,7 @@ cd src-tauri && cargo test
 
 ## Windows 发布
 
-推送与应用版本一致的 `v<semver>` 标签后，GitHub Actions 会自动构建 Windows x64 NSIS `.exe` 与 MSI，并发布到 GitHub Releases。具体版本同步、标签命令和未签名安装包说明见 [发布说明](docs/RELEASE.md)。
+推送与应用版本一致的 `v<semver>` 标签后，GitHub Actions 会自动构建 Windows x64 NSIS `.exe` 与 MSI，对主程序及安装程序签名后发布到 GitHub Releases。PFX 的本地环境变量和 GitHub Secrets 配置见 [发布说明](docs/RELEASE.md)。
 
 ## 技术选型
 

@@ -19,12 +19,7 @@ pub struct AppState {
 }
 
 impl AppState {
-    pub fn new(
-        storage: Storage,
-        settings: Settings,
-        runtime: RuntimeData,
-        locale: Locale,
-    ) -> Self {
+    pub fn new(storage: Storage, settings: Settings, runtime: RuntimeData, locale: Locale) -> Self {
         Self {
             storage,
             settings: Mutex::new(settings),
