@@ -7,3 +7,6 @@ src-tauri/gen/
 .DS_Store
 Thumbs.db
 
+# Windows code-signing private keys
+cert/*.pfx
+cert/*.p12

@@ -4,6 +4,12 @@ import { writeText } from "@tauri-apps/plugin-clipboard-manager";
 
 import { applyBracketKey, completeTrailingBrackets } from "./brackets.ts";
 import { createCommandRuntime, type CommandResult } from "./commands.ts";
+import {
+  applyCompletion,
+  DATA_OPERATIONS,
+  getCompletionSuggestions,
+  type CompletionSuggestion,
+} from "./completion.ts";
 import { createI18n } from "./i18n.ts";
 import { normalizeExpressionInput } from "./input-normalization.ts";
 import "./styles.css";
@@ -39,6 +45,11 @@ interface EvaluationResponse {
 }
 
 const i18n = createI18n();
+const isTauriRuntime = "__TAURI_INTERNALS__" in window;
+const previewParameters = new URLSearchParams(window.location.search);
+if (!isTauriRuntime && previewParameters.get("theme") === "light") {
+  document.documentElement.dataset.previewTheme = "light";
+}
 document.documentElement.lang = i18n.locale;
 document.querySelector<HTMLMetaElement>('meta[name="description"]')?.setAttribute(
   "content",
@@ -66,18 +77,27 @@ root.innerHTML = `
     <div class="workspace">
       <form id="calculator" class="calculator" autocomplete="off">
         <label class="sr-only" for="expression">${escapeHtml(i18n.t("expressionLabel"))}</label>
-        <div class="input-row">
-          <span class="prompt" aria-hidden="true">›</span>
-          <input
-            id="expression"
-            name="expression"
-            type="text"
-            inputmode="text"
-            spellcheck="false"
-            maxlength="4096"
-            placeholder="${escapeHtml(i18n.t("expressionPlaceholder"))}"
-            aria-describedby="interaction-hint"
-          />
+        <div class="input-stack">
+          <div class="input-row">
+            <span class="prompt" aria-hidden="true">›</span>
+            <input
+              id="expression"
+              name="expression"
+              type="text"
+              inputmode="text"
+              spellcheck="false"
+              maxlength="4096"
+              placeholder="${escapeHtml(i18n.t("expressionPlaceholder"))}"
+              aria-describedby="interaction-hint"
+              aria-autocomplete="list"
+              aria-controls="completion-list"
+              aria-expanded="false"
+              role="combobox"
+            />
+          </div>
+          <div id="completion-panel" class="completion-panel" hidden>
+            <ul id="completion-list" class="completion-list" role="listbox"></ul>
+          </div>
         </div>
         <div id="result-panel" class="result-panel" aria-live="polite">
           <output id="result" class="result">0</output>
@@ -109,6 +129,8 @@ root.innerHTML = `
 
 const form = requireElement<HTMLFormElement>("#calculator");
 const input = requireElement<HTMLInputElement>("#expression");
+const completionPanel = requireElement<HTMLElement>("#completion-panel");
+const completionList = requireElement<HTMLUListElement>("#completion-list");
 const result = requireElement<HTMLOutputElement>("#result");
 const resultPanel = requireElement<HTMLElement>("#result-panel");
 const commandPanel = requireElement<HTMLElement>("#command-panel");
@@ -140,6 +162,8 @@ let readyToCopy = false;
 let busy = false;
 let composing = false;
 let toastTimer: number | undefined;
+let completionSuggestions: CompletionSuggestion[] = [];
+let activeCompletionIndex = 0;
 
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -216,6 +240,82 @@ function showNumericResult(value: string): void {
   commandPanel.hidden = true;
   result.hidden = false;
   result.value = value;
+  result.dataset.size =
+    value.length <= 12 ? "regular" : value.length <= 20 ? "compact" : value.length <= 32 ? "dense" : "wrap";
+}
+
+function variableNames(): string[] {
+  return ["pi", "e", "res", "tmstamp", "tmlocal", "tmutc", ...Object.keys(snapshot.variables)];
+}
+
+function commandNames(): string[] {
+  return commandRuntime.commands.list().map((command) => command.name);
+}
+
+function refreshCompletions(): void {
+  completionSuggestions = getCompletionSuggestions(
+    input.value,
+    input.selectionStart ?? input.value.length,
+    variableNames(),
+    commandNames(),
+    DATA_OPERATIONS,
+  );
+  activeCompletionIndex = 0;
+  renderCompletions();
+}
+
+function renderCompletions(): void {
+  const hasSuggestions = completionSuggestions.length > 0;
+  completionPanel.hidden = !hasSuggestions;
+  input.setAttribute("aria-expanded", String(hasSuggestions));
+  input.removeAttribute("aria-activedescendant");
+
+  completionList.replaceChildren(
+    ...completionSuggestions.map((suggestion, index) => {
+      const item = document.createElement("li");
+      const button = document.createElement("button");
+      const id = `completion-${index}`;
+      button.id = id;
+      button.className = "completion-item";
+      button.type = "button";
+      button.dataset.completionIndex = String(index);
+      button.setAttribute("role", "option");
+      button.setAttribute("aria-selected", String(index === activeCompletionIndex));
+      button.innerHTML = `<span>${escapeHtml(suggestion.label)}</span><small>${escapeHtml(
+        i18n.t(
+          suggestion.kind === "command"
+            ? "completionCommand"
+            : suggestion.kind === "operation"
+              ? "completionOperation"
+              : "completionVariable",
+        ),
+      )}</small>`;
+      if (index === activeCompletionIndex) {
+        input.setAttribute("aria-activedescendant", id);
+      }
+      item.append(button);
+      return item;
+    }),
+  );
+}
+
+function acceptCompletion(index = activeCompletionIndex): boolean {
+  const suggestion = completionSuggestions[index];
+  if (!suggestion) {
+    return false;
+  }
+  const edit = applyCompletion(input.value, suggestion);
+  input.value = edit.value;
+  input.setSelectionRange(edit.cursor, edit.cursor);
+  readyToCopy = false;
+  refreshCompletions();
+  return true;
+}
+
+function dismissCompletions(): void {
+  completionSuggestions = [];
+  activeCompletionIndex = 0;
+  renderCompletions();
 }
 
 function showCommandResult(response: CommandResult): void {
@@ -366,9 +466,29 @@ input.addEventListener("input", () => {
   if (input.value.trim() !== lastSubmittedExpression) {
     readyToCopy = false;
   }
+  refreshCompletions();
 });
 
 input.addEventListener("keydown", (event) => {
+  if (event.key === "Tab" && completionSuggestions.length > 0) {
+    event.preventDefault();
+    acceptCompletion();
+    return;
+  }
+
+  if (
+    (event.key === "ArrowDown" || event.key === "ArrowUp") &&
+    completionSuggestions.length > 0
+  ) {
+    event.preventDefault();
+    const direction = event.key === "ArrowDown" ? 1 : -1;
+    activeCompletionIndex =
+      (activeCompletionIndex + direction + completionSuggestions.length) %
+      completionSuggestions.length;
+    renderCompletions();
+    return;
+  }
+
   if (event.key === "Escape") {
     event.preventDefault();
     void hideWindow();
@@ -389,6 +509,17 @@ input.addEventListener("keydown", (event) => {
   input.value = edit.value;
   input.setSelectionRange(edit.cursor, edit.cursor);
   readyToCopy = false;
+  refreshCompletions();
+});
+
+completionList.addEventListener("mousedown", (event) => {
+  event.preventDefault();
+  const target = (event.target as HTMLElement).closest<HTMLButtonElement>("[data-completion-index]");
+  if (!target) {
+    return;
+  }
+  acceptCompletion(Number(target.dataset.completionIndex));
+  input.focus();
 });
 
 historyList.addEventListener("click", (event) => {
@@ -400,19 +531,40 @@ historyList.addEventListener("click", (event) => {
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
   readyToCopy = false;
+  refreshCompletions();
 });
 
 quitButton.addEventListener("click", () => {
   void invoke("quit_app");
 });
 
-getCurrentWindow().onFocusChanged(({ payload: focused }) => {
-  if (focused) {
-    window.setTimeout(() => input.focus(), 0);
-  }
-});
+if (isTauriRuntime) {
+  getCurrentWindow().onFocusChanged(({ payload: focused }) => {
+    if (focused) {
+      window.setTimeout(() => {
+        input.value = "";
+        lastSubmittedExpression = "";
+        readyToCopy = false;
+        dismissCompletions();
+        input.focus();
+      }, 0);
+    }
+  });
+}
 
 async function bootstrap(): Promise<void> {
+  if (!isTauriRuntime) {
+    renderSnapshot();
+    if (previewParameters.get("preview") === "long-result") {
+      showNumericResult("2026-08-02 19:17:28");
+      showStatus(i18n.t("resultReady"), "success");
+    } else {
+      showStatus(i18n.t("waiting"));
+    }
+    input.focus();
+    return;
+  }
+
   try {
     snapshot = await invoke<Snapshot>("get_snapshot");
     renderSnapshot();

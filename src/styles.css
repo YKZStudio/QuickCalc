@@ -127,9 +127,14 @@ button {
   border-right: 1px solid rgb(255 255 255 / 7%);
 }
 
+.input-stack {
+  position: relative;
+  z-index: 2;
+}
+
 .input-row {
   display: flex;
-  align-items: center;
+  align-items: baseline;
   gap: 12px;
   padding-bottom: 13px;
   border-bottom: 1px solid rgb(137 153 227 / 33%);
@@ -137,8 +142,9 @@ button {
 
 .prompt {
   color: #8fa0ff;
-  font-size: 30px;
-  line-height: 1;
+  font-family: var(--font-mono);
+  font-size: 25px;
+  line-height: 1.25;
 }
 
 #expression {
@@ -151,6 +157,7 @@ button {
   background: transparent;
   font-family: var(--font-mono);
   font-size: 19px;
+  line-height: 1.25;
   caret-color: #9babff;
   user-select: text;
 }
@@ -168,15 +175,40 @@ button {
 }
 
 .result {
-  overflow: hidden;
+  display: block;
+  width: 100%;
+  max-height: 150px;
+  overflow-x: hidden;
+  overflow-y: auto;
   color: #f7f8ff;
   font-family: var(--font-mono);
-  font-size: clamp(30px, 5vw, 48px);
   font-weight: 650;
   line-height: 1.18;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  overflow-wrap: anywhere;
+  scrollbar-width: none;
+  white-space: pre-wrap;
   user-select: text;
+}
+
+.result::-webkit-scrollbar,
+.command-panel::-webkit-scrollbar {
+  display: none;
+}
+
+.result[data-size="regular"] {
+  font-size: clamp(30px, 5vw, 48px);
+}
+
+.result[data-size="compact"] {
+  font-size: 30px;
+}
+
+.result[data-size="dense"] {
+  font-size: 23px;
+}
+
+.result[data-size="wrap"] {
+  font-size: 18px;
 }
 
 .command-panel {
@@ -184,7 +216,59 @@ button {
   overflow-y: auto;
   color: #dce2f2;
   font-family: var(--font-mono);
+  scrollbar-width: none;
   user-select: text;
+}
+
+.completion-panel {
+  position: absolute;
+  top: calc(100% + 8px);
+  right: 0;
+  left: 36px;
+  padding: 5px;
+  border: 1px solid rgb(144 163 255 / 20%);
+  border-radius: 9px;
+  background: #11182c;
+  box-shadow: 0 14px 36px rgb(0 0 0 / 35%);
+}
+
+.completion-list {
+  display: grid;
+  margin: 0;
+  padding: 0;
+  gap: 2px;
+  list-style: none;
+}
+
+.completion-item {
+  display: flex;
+  width: 100%;
+  padding: 7px 9px;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  border: 0;
+  border-radius: 6px;
+  background: transparent;
+  cursor: pointer;
+  font-family: var(--font-mono);
+  text-align: left;
+}
+
+.completion-item[aria-selected="true"],
+.completion-item:hover {
+  background: rgb(143 160 255 / 13%);
+}
+
+.completion-item span {
+  color: #edf1ff;
+  font-size: 12px;
+}
+
+.completion-item small {
+  color: #69748e;
+  font-family: Inter, ui-sans-serif, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+  font-size: 9px;
 }
 
 .command-title {
@@ -346,8 +430,253 @@ button {
 
 @media (prefers-reduced-motion: no-preference) {
   .history-item,
-  .icon-button {
+  .icon-button,
+  .completion-item {
     transition: background-color 120ms ease, color 120ms ease;
   }
 }
 
+@media (prefers-color-scheme: light) {
+  :root {
+    color: #29344a;
+    background: #eef2f8;
+    color-scheme: light;
+  }
+
+  body {
+    background: #eef2f8;
+  }
+
+  .shell {
+    border-color: rgb(65 82 133 / 20%);
+    background: rgb(249 250 253 / 98%);
+    box-shadow: 0 24px 64px rgb(42 55 92 / 20%);
+  }
+
+  .titlebar,
+  .footer {
+    border-color: rgb(45 57 91 / 10%);
+  }
+
+  .calculator {
+    border-color: rgb(45 57 91 / 10%);
+  }
+
+  .brand,
+  #expression,
+  .result,
+  .command-title {
+    color: #172033;
+  }
+
+  .key-hint {
+    border-color: rgb(49 63 105 / 12%);
+    color: #65708a;
+    background: rgb(64 80 128 / 4%);
+  }
+
+  .icon-button {
+    color: #65708a;
+  }
+
+  .icon-button:hover {
+    color: #a6263e;
+    background: #d5536817;
+  }
+
+  .input-row {
+    border-color: rgb(78 96 173 / 28%);
+  }
+
+  #expression::placeholder {
+    color: #8a93a8;
+  }
+
+  .command-panel {
+    color: #303c55;
+  }
+
+  .command-lines,
+  .side-heading,
+  .history-expression {
+    color: #68738b;
+  }
+
+  .status {
+    color: #7b859b;
+  }
+
+  .result-panel[data-kind="success"] .status {
+    color: #168562;
+  }
+
+  .result-panel[data-kind="error"] .status {
+    color: #c43f55;
+  }
+
+  .interaction-hint,
+  .count,
+  .history time,
+  .empty-history,
+  .footer {
+    color: #8791a7;
+  }
+
+  .side-panel {
+    background: rgb(66 81 126 / 3.5%);
+  }
+
+  .history-item:hover,
+  .history-item:focus-visible {
+    background: rgb(91 109 194 / 8%);
+  }
+
+  .history-result {
+    color: #27334b;
+  }
+
+  .history {
+    scrollbar-color: #b7bfd0 transparent;
+  }
+
+  .completion-panel {
+    border-color: rgb(65 82 133 / 18%);
+    background: #fff;
+    box-shadow: 0 14px 36px rgb(42 55 92 / 16%);
+  }
+
+  .completion-item[aria-selected="true"],
+  .completion-item:hover {
+    background: rgb(91 109 194 / 9%);
+  }
+
+  .completion-item span {
+    color: #25314a;
+  }
+
+  .completion-item small {
+    color: #8a93a8;
+  }
+}
+
+/* Browser-only visual QA override; the Tauri app always follows the system media query. */
+:root[data-preview-theme="light"] {
+  color: #29344a;
+  background: #eef2f8;
+  color-scheme: light;
+}
+
+:root[data-preview-theme="light"] body {
+  background: #eef2f8;
+}
+
+:root[data-preview-theme="light"] .shell {
+  border-color: rgb(65 82 133 / 20%);
+  background: rgb(249 250 253 / 98%);
+  box-shadow: 0 24px 64px rgb(42 55 92 / 20%);
+}
+
+:root[data-preview-theme="light"] .titlebar,
+:root[data-preview-theme="light"] .footer {
+  border-color: rgb(45 57 91 / 10%);
+}
+
+:root[data-preview-theme="light"] .calculator {
+  border-color: rgb(45 57 91 / 10%);
+}
+
+:root[data-preview-theme="light"] .brand,
+:root[data-preview-theme="light"] #expression,
+:root[data-preview-theme="light"] .result,
+:root[data-preview-theme="light"] .command-title {
+  color: #172033;
+}
+
+:root[data-preview-theme="light"] .key-hint {
+  border-color: rgb(49 63 105 / 12%);
+  color: #65708a;
+  background: rgb(64 80 128 / 4%);
+}
+
+:root[data-preview-theme="light"] .icon-button {
+  color: #65708a;
+}
+
+:root[data-preview-theme="light"] .icon-button:hover {
+  color: #a6263e;
+  background: #d5536817;
+}
+
+:root[data-preview-theme="light"] .input-row {
+  border-color: rgb(78 96 173 / 28%);
+}
+
+:root[data-preview-theme="light"] #expression::placeholder {
+  color: #8a93a8;
+}
+
+:root[data-preview-theme="light"] .command-panel {
+  color: #303c55;
+}
+
+:root[data-preview-theme="light"] .command-lines,
+:root[data-preview-theme="light"] .side-heading,
+:root[data-preview-theme="light"] .history-expression {
+  color: #68738b;
+}
+
+:root[data-preview-theme="light"] .status {
+  color: #7b859b;
+}
+
+:root[data-preview-theme="light"] .result-panel[data-kind="success"] .status {
+  color: #168562;
+}
+
+:root[data-preview-theme="light"] .result-panel[data-kind="error"] .status {
+  color: #c43f55;
+}
+
+:root[data-preview-theme="light"] .interaction-hint,
+:root[data-preview-theme="light"] .count,
+:root[data-preview-theme="light"] .history time,
+:root[data-preview-theme="light"] .empty-history,
+:root[data-preview-theme="light"] .footer {
+  color: #8791a7;
+}
+
+:root[data-preview-theme="light"] .side-panel {
+  background: rgb(66 81 126 / 3.5%);
+}
+
+:root[data-preview-theme="light"] .history-item:hover,
+:root[data-preview-theme="light"] .history-item:focus-visible {
+  background: rgb(91 109 194 / 8%);
+}
+
+:root[data-preview-theme="light"] .history-result {
+  color: #27334b;
+}
+
+:root[data-preview-theme="light"] .history {
+  scrollbar-color: #b7bfd0 transparent;
+}
+
+:root[data-preview-theme="light"] .completion-panel {
+  border-color: rgb(65 82 133 / 18%);
+  background: #fff;
+  box-shadow: 0 14px 36px rgb(42 55 92 / 16%);
+}
+
+:root[data-preview-theme="light"] .completion-item[aria-selected="true"],
+:root[data-preview-theme="light"] .completion-item:hover {
+  background: rgb(91 109 194 / 9%);
+}
+
+:root[data-preview-theme="light"] .completion-item span {
+  color: #25314a;
+}
+
+:root[data-preview-theme="light"] .completion-item small {
+  color: #8a93a8;
+}

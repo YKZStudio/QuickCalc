@@ -77,15 +77,13 @@ fn read_json_with_backup<T: DeserializeOwned>(path: &Path, locale: Locale) -> Re
 }
 
 fn atomic_write_json<T: Serialize>(path: &Path, value: &T, locale: Locale) -> Result<(), String> {
-    let parent = path
-        .parent()
-        .ok_or_else(|| {
-            tr!(locale;
-                format!("无效的数据文件路径：{}", path.display()),
-                format!("無效的資料檔案路徑：{}", path.display()),
-                format!("Invalid data file path: {}", path.display()),
-            )
-        })?;
+    let parent = path.parent().ok_or_else(|| {
+        tr!(locale;
+            format!("无效的数据文件路径：{}", path.display()),
+            format!("無效的資料檔案路徑：{}", path.display()),
+            format!("Invalid data file path: {}", path.display()),
+        )
+    })?;
     fs::create_dir_all(parent).map_err(|error| {
         tr!(locale;
             format!("无法创建数据目录 {}：{error}", parent.display()),

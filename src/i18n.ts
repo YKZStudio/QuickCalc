@@ -11,6 +11,9 @@ const enUS = {
   expressionPlaceholder: "Enter an expression or /help, e.g. 0b1010.oct",
   waiting: "Waiting for input",
   interactionHint: "Enter calculate · /help help · Enter again to copy · Esc hide",
+  completionVariable: "Variable",
+  completionCommand: "Command",
+  completionOperation: "Operation",
   recentHistory: "Recent history",
   recentCalculations: "Recent calculations",
   emptyHistory: "Results are saved here automatically",
@@ -39,11 +42,11 @@ const enUS = {
   helpExpression:
     "Expressions: press Enter to evaluate; press Enter again without changing the expression to copy the result.",
   helpBaseConversion:
-    "Base conversion: use expression.base, for example 0b1010.oct or 12345.6789.hex.",
+    "Data operations: type a dot to complete bin, oct, dec/dex, hex, ascii, base64, or tostr; for example 0b1010.oct.",
   helpTime:
     "Time: tmstamp is the Unix timestamp in seconds; tmlocal and tmutc show local time and UTC and can be saved for subtraction.",
   helpAscii:
-    "ASCII: Hello.ascii converts text to codes; 72 101 108 108 111.tostr converts codes back to text.",
+    "Text: Hello.ascii returns ASCII codes; Hello.base64 encodes UTF-8; tostr decodes Base64 or ASCII codes.",
   pluginSummary: "List, enable, disable, or remove loaded plugins",
   pluginUsage: "/plugin [list|enable <id>|disable <id>|remove <id>|help]",
   pluginHelpTitle: "Plugin Management Help",
@@ -84,6 +87,9 @@ const zhCN: Messages = {
   expressionPlaceholder: "输入表达式或 /help，例如 0b1010.oct",
   waiting: "等待输入",
   interactionHint: "Enter 计算 · /help 帮助 · 再按 Enter 复制 · Esc 隐藏",
+  completionVariable: "变量",
+  completionCommand: "命令",
+  completionOperation: "操作",
   recentHistory: "最近记录",
   recentCalculations: "最近计算",
   emptyHistory: "计算结果会自动保存在这里",
@@ -110,10 +116,11 @@ const zhCN: Messages = {
   helpTitle: "QuickCalc 帮助",
   helpExpression: "表达式：输入表达式后按 Enter 求值；表达式不变时再按 Enter 复制结果。",
   helpBaseConversion:
-    "进制转换：使用“源表达式.进制”，例如 0b1010.oct、12345.6789.hex。",
+    "数据操作：输入点号可补全 bin、oct、dec/dex、hex、ascii、base64 或 tostr，例如 0b1010.oct。",
   helpTime:
     "时间：tmstamp 为 Unix 秒时间戳；tmlocal 与 tmutc 显示本地时间和 UTC，可保存后相减。",
-  helpAscii: "ASCII：Hello.ascii 转为编码；72 101 108 108 111.tostr 转回字符串。",
+  helpAscii:
+    "文本：Hello.ascii 输出 ASCII 编码；Hello.base64 编码 UTF-8；tostr 可解码 Base64 或 ASCII 编码。",
   pluginSummary: "列出、启用、停用或移除已加载插件",
   pluginUsage: "/plugin [list|enable <id>|disable <id>|remove <id>|help]",
   pluginHelpTitle: "插件管理帮助",
@@ -149,6 +156,9 @@ const zhTW: Messages = {
   expressionPlaceholder: "輸入運算式或 /help，例如 0b1010.oct",
   waiting: "等待輸入",
   interactionHint: "Enter 計算 · /help 說明 · 再按 Enter 複製 · Esc 隱藏",
+  completionVariable: "變數",
+  completionCommand: "指令",
+  completionOperation: "操作",
   recentHistory: "最近記錄",
   recentCalculations: "最近計算",
   emptyHistory: "計算結果會自動儲存在這裡",
@@ -175,10 +185,11 @@ const zhTW: Messages = {
   helpTitle: "QuickCalc 說明",
   helpExpression: "運算式：輸入運算式後按 Enter 求值；運算式不變時再按 Enter 複製結果。",
   helpBaseConversion:
-    "進位轉換：使用「來源運算式.進位」，例如 0b1010.oct、12345.6789.hex。",
+    "資料操作：輸入句點可補全 bin、oct、dec/dex、hex、ascii、base64 或 tostr，例如 0b1010.oct。",
   helpTime:
     "時間：tmstamp 是 Unix 秒時間戳；tmlocal 與 tmutc 顯示本機時間和 UTC，可儲存後相減。",
-  helpAscii: "ASCII：Hello.ascii 轉為編碼；72 101 108 108 111.tostr 轉回字串。",
+  helpAscii:
+    "文字：Hello.ascii 輸出 ASCII 編碼；Hello.base64 編碼 UTF-8；tostr 可解碼 Base64 或 ASCII 編碼。",
   pluginSummary: "列出、啟用、停用或移除已載入的外掛程式",
   pluginUsage: "/plugin [list|enable <id>|disable <id>|remove <id>|help]",
   pluginHelpTitle: "外掛程式管理說明",
