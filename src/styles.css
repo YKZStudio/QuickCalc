@@ -151,7 +151,8 @@ body {
 }
 
 button,
-input {
+input,
+select {
   color: inherit;
   font: inherit;
 }
@@ -253,7 +254,10 @@ button.traffic-control:focus-visible {
 }
 
 .key-hint {
+  display: inline-flex;
+  height: 26px;
   padding: 4px 7px;
+  align-items: center;
   border: 1px solid var(--separator);
   border-radius: 7px;
   background: var(--surface);
@@ -265,6 +269,7 @@ button.traffic-control:focus-visible {
 }
 
 .quit-button {
+  height: 26px;
   min-height: 26px;
   padding: 3px 10px;
   border: 1px solid var(--separator);
@@ -356,7 +361,9 @@ button.traffic-control:focus-visible {
   color: var(--text);
   font-family: var(--font-mono);
   font-weight: 500;
-  line-height: 1.05;
+  /* Reserve enough ascent/descent room for glyphs such as g, j and y. */
+  line-height: 1.18;
+  padding-block: 0.04em 0.1em;
   letter-spacing: -0.055em;
   overflow-wrap: anywhere;
   scrollbar-width: none;
@@ -624,6 +631,69 @@ button.traffic-control:focus-visible {
   scrollbar-color: var(--separator-strong) transparent;
   scrollbar-width: thin;
 }
+
+.history-search {
+  display: block;
+  margin: 0 0 8px;
+}
+
+.history-search input {
+  width: 100%;
+  padding: 7px 9px;
+  border: 1px solid var(--separator);
+  border-radius: 7px;
+  outline: none;
+  background: var(--surface);
+  color: var(--text);
+  font-size: 12px;
+}
+
+.history-search input:focus { border-color: var(--accent); }
+
+.settings-modal {
+  position: fixed;
+  z-index: 10;
+  inset: 0;
+  display: grid;
+  padding: 22px;
+  place-items: center;
+  background: rgb(0 0 0 / 30%);
+  backdrop-filter: blur(4px);
+}
+
+.settings-card {
+  width: min(490px, 100%);
+  max-height: 100%;
+  overflow: auto;
+  padding: 17px;
+  border: 1px solid var(--separator-strong);
+  border-radius: 12px;
+  background: var(--app-bg);
+  box-shadow: var(--popover-shadow);
+}
+
+.settings-card header,
+.settings-card footer,
+.settings-toggle,
+.settings-update {
+  display: flex;
+  align-items: center;
+}
+
+.settings-card header { justify-content: space-between; font-size: 15px; }
+.settings-close { border: 0; background: transparent; color: var(--text-muted); cursor: pointer; font-size: 24px; line-height: 1; }
+.settings-card form { display: grid; margin-top: 14px; gap: 13px; }
+.settings-card label { display: grid; gap: 6px; color: var(--text-soft); font-size: 12px; font-weight: 600; }
+.settings-card input[type="text"], .settings-card select { width: 100%; padding: 8px; border: 1px solid var(--separator); border-radius: 7px; outline: none; background: var(--surface); }
+.settings-card input:focus, .settings-card select:focus { border-color: var(--accent); }
+.settings-toggle { justify-content: space-between; grid-template-columns: 1fr auto !important; }
+.settings-toggle input, .settings-update input { width: 16px; height: 16px; accent-color: var(--accent); }
+.settings-note { margin: -7px 0 0; color: var(--text-muted); font-size: 11px; line-height: 1.4; }
+.settings-update { flex-wrap: wrap; gap: 8px; color: var(--text-soft); font-size: 12px; font-weight: 600; }
+.settings-update span { margin-right: auto; }
+.settings-update button, .settings-update a, .settings-card footer button { padding: 6px 9px; border: 1px solid var(--separator); border-radius: 7px; background: var(--surface); color: var(--text-soft); cursor: pointer; font-size: 12px; text-decoration: none; }
+.settings-card footer { margin-top: 3px; justify-content: flex-end; gap: 8px; }
+.settings-card .settings-save { border-color: var(--accent); background: var(--accent); color: white; }
 
 .history-item {
   display: flex;

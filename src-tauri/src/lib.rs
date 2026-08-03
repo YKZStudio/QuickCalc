@@ -3,6 +3,7 @@ mod commands;
 mod evaluator;
 mod i18n;
 mod model;
+mod plugins;
 mod storage;
 
 use app_state::AppState;
@@ -69,6 +70,11 @@ pub fn run() {
                 .build(),
         )
         .plugin(tauri_plugin_clipboard_manager::init())
+        .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+            let Some(window) = app.get_webview_window("main") else { return; };
+            let _ = window.show();
+            let _ = window.set_focus();
+        }))
         .setup(|app| {
             let locale = Locale::system();
             let data_directory = app.path().app_data_dir()?;
@@ -152,6 +158,8 @@ pub fn run() {
             commands::clean_history,
             commands::delete_variable,
             commands::set_color_mode,
+            commands::update_settings,
+            commands::list_plugins,
             commands::evaluate_expression,
             commands::hide_main_window,
             commands::quit_app,

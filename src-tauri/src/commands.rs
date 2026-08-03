@@ -1,6 +1,8 @@
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use tauri::{AppHandle, State, WebviewWindow};
+use tauri_plugin_autostart::ManagerExt;
+use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 use crate::{
     app_state::AppState,
@@ -15,6 +17,11 @@ use crate::{
 #[tauri::command]
 pub fn get_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
     state.snapshot()
+}
+
+#[tauri::command]
+pub fn list_plugins() -> Vec<crate::plugins::PluginDescriptor> {
+    crate::plugins::discover()
 }
 
 #[tauri::command]
@@ -96,6 +103,7 @@ pub fn evaluate_expression(
     state: State<'_, AppState>,
 ) -> Result<EvaluationResponse, String> {
     let locale = state.locale;
+    let precision = state.settings.lock().map_err(|_| "The settings state lock is corrupted".to_owned())?.precision;
     let mut runtime = state.runtime.lock().map_err(|_| {
         locale
             .text(
@@ -133,6 +141,7 @@ pub fn evaluate_expression(
         locale,
         timestamp_ms,
         format!("{timestamp_ms}-{}", state.next_sequence()),
+        precision,
     );
 
     // The command does not return success until the new result is synced to disk.
@@ -147,6 +156,7 @@ fn evaluate_and_record(
     locale: Locale,
     timestamp_ms: u64,
     id: String,
+    precision: u8,
 ) -> EvaluationResponse {
     let evaluation = Evaluator::new(
         &runtime.variables,
@@ -154,6 +164,7 @@ fn evaluate_and_record(
         runtime.res,
         runtime.res_kind,
         locale,
+        precision,
     )
     .evaluate(&expression);
 
@@ -194,6 +205,42 @@ fn evaluate_and_record(
 }
 
 #[tauri::command]
+pub fn update_settings(
+    hotkey: String,
+    autostart: bool,
+    hide_on_blur: bool,
+    precision: u8,
+    font_family: String,
+    auto_update: bool,
+    app: AppHandle,
+    state: State<'_, AppState>,
+) -> Result<crate::model::Settings, String> {
+    let mut settings = state.settings.lock().map_err(|_| "The settings state lock is corrupted".to_owned())?;
+    let mut updated = settings.clone();
+    let hotkey = hotkey.trim().to_owned();
+    if hotkey.is_empty() { return Err("快捷键不能为空".to_owned()); }
+    if updated.hotkey != hotkey {
+        app.global_shortcut().unregister_all().map_err(|error| format!("无法释放旧快捷键：{error}"))?;
+        if let Err(error) = app.global_shortcut().register(hotkey.as_str()) {
+            let _ = app.global_shortcut().register(updated.hotkey.as_str());
+            return Err(format!("无法注册快捷键 {hotkey}：{error}"));
+        }
+        updated.hotkey = hotkey;
+    }
+    updated.autostart = autostart;
+    updated.hide_on_blur = hide_on_blur;
+    updated.precision = precision.clamp(0, 15);
+    updated.font_family = font_family.trim().to_owned();
+    updated.auto_update = auto_update;
+    updated = updated.normalize();
+    if updated.autostart { app.autolaunch().enable().map_err(|error| format!("无法启用开机自启动：{error}"))?; }
+    else { app.autolaunch().disable().map_err(|error| format!("无法停用开机自启动：{error}"))?; }
+    state.storage.save_settings(&updated)?;
+    *settings = updated.clone();
+    Ok(updated)
+}
+
+#[tauri::command]
 pub fn hide_main_window(window: WebviewWindow, state: State<'_, AppState>) -> Result<(), String> {
     state.persist_all()?;
     window.hide().map_err(|error| {
@@ -226,6 +273,7 @@ mod tests {
             Locale::ZhCn,
             123,
             "error-1".to_owned(),
+            12,
         );
 
         assert!(response.error.is_some());

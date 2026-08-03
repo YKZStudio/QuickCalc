@@ -73,6 +73,7 @@ pub struct Evaluator<'a> {
     res: f64,
     res_kind: ValueKind,
     locale: Locale,
+    precision: u8,
 }
 
 impl<'a> Evaluator<'a> {
@@ -82,6 +83,7 @@ impl<'a> Evaluator<'a> {
         res: f64,
         res_kind: ValueKind,
         locale: Locale,
+        precision: u8,
     ) -> Self {
         Self {
             variables,
@@ -89,6 +91,7 @@ impl<'a> Evaluator<'a> {
             res,
             res_kind,
             locale,
+            precision: precision.clamp(0, 15),
         }
     }
 
@@ -147,11 +150,11 @@ impl<'a> Evaluator<'a> {
         ensure_finite(value.number)?;
 
         let display = match conversion.as_ref() {
-            Some(Conversion::Base(base)) => format_in_base(value.number, base)?,
+            Some(Conversion::Base(base)) => format_in_base(value.number, base, self.precision)?,
             Some(Conversion::Ascii | Conversion::Base64 | Conversion::ToString) => {
                 unreachable!("text conversions returned above")
             }
-            None => format_value(value)?,
+            None => format_value(value, self.precision)?,
         };
 
         Ok(EvaluatorOutput {
@@ -1276,9 +1279,9 @@ fn unquote(source: &str) -> &str {
     source
 }
 
-fn format_value(value: Value) -> Result<String, String> {
+fn format_value(value: Value, precision: u8) -> Result<String, String> {
     match value.kind {
-        ValueKind::Number | ValueKind::UnixTimestamp => Ok(format_number(value.number)),
+        ValueKind::Number | ValueKind::UnixTimestamp => Ok(format_number(value.number, precision)),
         ValueKind::LocalDateTime => format_datetime(value.number, true),
         ValueKind::UtcDateTime => format_datetime(value.number, false),
         ValueKind::Duration => format_duration(value.number),
@@ -1331,9 +1334,9 @@ fn format_duration(value: f64) -> Result<String, String> {
     ))
 }
 
-fn format_in_base(value: f64, base: &str) -> Result<String, String> {
+fn format_in_base(value: f64, base: &str, precision: u8) -> Result<String, String> {
     if base == "dec" {
-        return Ok(format_number(value));
+        return Ok(format_number(value, precision));
     }
 
     const LOWER_BOUND: f64 = -9_223_372_036_854_775_808.0;
@@ -1393,7 +1396,8 @@ fn format_fraction(mut fraction: f64, radix: u32, max_digits: usize) -> String {
     digits
 }
 
-fn format_number(value: f64) -> String {
+fn format_number(value: f64, precision: u8) -> String {
+    let precision = usize::from(precision);
     if value == 0.0 {
         return "0".to_owned();
     }
@@ -1403,7 +1407,7 @@ fn format_number(value: f64) -> String {
 
     let absolute = value.abs();
     if !(1e-9..1e15).contains(&absolute) {
-        let formatted = format!("{value:.12e}");
+        let formatted = format!("{value:.precision$e}");
         let (mantissa, exponent) = formatted
             .split_once('e')
             .expect("scientific notation always contains an exponent");
@@ -1411,7 +1415,7 @@ fn format_number(value: f64) -> String {
         return format!("{mantissa}e{}", exponent.trim_start_matches('+'));
     }
 
-    let formatted = format!("{value:.12}");
+    let formatted = format!("{value:.precision$}");
     formatted
         .trim_end_matches('0')
         .trim_end_matches('.')
@@ -1433,6 +1437,7 @@ mod tests {
     use crate::model::ValueKind;
     use chrono::Local;
     use std::collections::HashMap;
+    use std::time::Instant;
 
     fn evaluate_output(expression: &str) -> Result<EvaluatorOutput, String> {
         let variables = HashMap::new();
@@ -1443,6 +1448,7 @@ mod tests {
             12.0,
             ValueKind::Number,
             Locale::ZhCn,
+            12,
         )
         .evaluate(expression)
     }
@@ -1469,6 +1475,13 @@ mod tests {
     fn evaluates_roots_and_constants() {
         assert_eq!(evaluate("sqrt(81) + root(32, 5)").unwrap().0, 11.0);
         assert!((evaluate("pi * 2").unwrap().0 - std::f64::consts::TAU).abs() < 1e-12);
+    }
+
+    #[test]
+    fn benchmark_ten_thousand_expressions() {
+        let started = Instant::now();
+        for index in 1..=10_000 { evaluate(&format!("({index} * 1.08 + 42) / 3")).unwrap(); }
+        eprintln!("QuickCalc 10k expressions: {} ms", started.elapsed().as_millis());
     }
 
     #[test]
@@ -1503,6 +1516,7 @@ mod tests {
             12.0,
             ValueKind::Number,
             Locale::ZhCn,
+            12,
         )
         .evaluate("199 * (1 + TAX)")
         .unwrap();
@@ -1551,6 +1565,7 @@ mod tests {
             0.0,
             ValueKind::Number,
             Locale::ZhCn,
+            12,
         )
         .evaluate("stop - start")
         .unwrap();
@@ -1597,6 +1612,7 @@ mod tests {
             0.0,
             ValueKind::Number,
             Locale::ZhTw,
+            12,
         );
         assert_eq!(traditional.evaluate("1 / 0").unwrap_err(), "不能除以 0");
         assert_eq!(
@@ -1610,6 +1626,7 @@ mod tests {
             0.0,
             ValueKind::Number,
             Locale::EnUs,
+            12,
         );
         assert_eq!(
             english.evaluate("1 / 0").unwrap_err(),

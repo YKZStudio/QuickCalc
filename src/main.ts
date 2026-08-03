@@ -26,6 +26,9 @@ interface Settings {
   historyLimit: number;
   hideOnBlur: boolean;
   colorMode: ColorMode;
+  precision: number;
+  fontFamily: string;
+  autoUpdate: boolean;
 }
 
 interface HistoryEntry {
@@ -89,6 +92,7 @@ root.innerHTML = `
       </div>
       <div class="title-actions">
         <span id="hotkey-hint" class="key-hint">Ctrl + Shift + Space</span>
+        <button id="settings-button" class="quit-button" type="button" title="设置">设置</button>
         <button id="quit-button" class="quit-button" type="button" title="${escapeHtml(i18n.t("quitTitle"))}">${escapeHtml(i18n.t("quitLabel"))}</button>
       </div>
     </header>
@@ -144,6 +148,7 @@ root.innerHTML = `
           <span>${escapeHtml(i18n.t("recentCalculations"))}</span>
           <span id="history-count" class="count">0 / 100</span>
         </div>
+        <label class="history-search"><span class="sr-only">搜索历史</span><input id="history-search" type="search" placeholder="搜索历史…" /></label>
         <ol id="history" class="history"></ol>
         <div id="empty-history" class="empty-history">${escapeHtml(i18n.t("emptyHistory"))}</div>
         <div class="side-save">
@@ -151,6 +156,22 @@ root.innerHTML = `
           <span>${escapeHtml(i18n.t("localAutoSave"))}</span>
         </div>
       </aside>
+    </div>
+    <div id="settings-modal" class="settings-modal" hidden>
+      <section class="settings-card" role="dialog" aria-modal="true" aria-label="设置">
+        <header><strong>设置</strong><button id="settings-close" type="button" class="settings-close" aria-label="关闭">×</button></header>
+        <form id="settings-form">
+          <label>全局快捷键<input id="setting-hotkey" name="hotkey" autocomplete="off" /></label>
+          <p class="settings-note">点击输入框后直接按下组合键；例如 Ctrl + Shift + Space。</p>
+          <label class="settings-toggle"><span>开机自启动</span><input id="setting-autostart" name="autostart" type="checkbox" /></label>
+          <label class="settings-toggle"><span>失焦时隐藏</span><input id="setting-hide-on-blur" name="hideOnBlur" type="checkbox" /></label>
+          <label>结果精度 <output id="precision-value">12</output><input id="setting-precision" name="precision" type="range" min="0" max="15" step="1" /></label>
+          <label>显示字体<select id="setting-font" name="fontFamily"><option value="system">系统默认</option><option value="Cascadia Mono">Cascadia Mono</option><option value="Consolas">Consolas</option><option value="Microsoft YaHei UI">Microsoft YaHei UI</option></select></label>
+          <div class="settings-update"><span>自动更新（GitHub）</span><input id="setting-auto-update" name="autoUpdate" type="checkbox" /><button id="check-update" type="button">检查更新</button><a id="update-link" target="_blank" rel="noreferrer" hidden>下载更新</a></div>
+          <p id="update-status" class="settings-note">自动从 GitHub Releases 检查新版。</p>
+          <footer><button id="settings-cancel" type="button">取消</button><button type="submit" class="settings-save">保存设置</button></footer>
+        </form>
+      </section>
     </div>
   </section>
 `;
@@ -172,6 +193,17 @@ const emptyHistory = requireElement<HTMLElement>("#empty-history");
 const variablesList = requireElement<HTMLElement>("#variables");
 const hotkeyHint = requireElement<HTMLElement>("#hotkey-hint");
 const quitButton = requireElement<HTMLButtonElement>("#quit-button");
+const settingsButton = requireElement<HTMLButtonElement>("#settings-button");
+const settingsModal = requireElement<HTMLElement>("#settings-modal");
+const settingsForm = requireElement<HTMLFormElement>("#settings-form");
+const settingHotkey = requireElement<HTMLInputElement>("#setting-hotkey");
+const settingAutostart = requireElement<HTMLInputElement>("#setting-autostart");
+const settingHideOnBlur = requireElement<HTMLInputElement>("#setting-hide-on-blur");
+const settingPrecision = requireElement<HTMLInputElement>("#setting-precision");
+const precisionValue = requireElement<HTMLOutputElement>("#precision-value");
+const settingFont = requireElement<HTMLSelectElement>("#setting-font");
+const settingAutoUpdate = requireElement<HTMLInputElement>("#setting-auto-update");
+const historySearch = requireElement<HTMLInputElement>("#history-search");
 const hideButton = requireElement<HTMLButtonElement>("#hide-button");
 const titlebar = requireElement<HTMLElement>(".titlebar");
 const sidePanel = requireElement<HTMLElement>(".side-panel");
@@ -189,6 +221,9 @@ let snapshot: Snapshot = {
     historyLimit: 100,
     hideOnBlur: true,
     colorMode: "auto",
+    precision: 12,
+    fontFamily: "system",
+    autoUpdate: true,
   },
   history: [],
   variables: {},
@@ -244,6 +279,13 @@ function applyColorMode(mode: ColorMode): void {
   }
 }
 
+function applyFontFamily(fontFamily: string): void {
+  document.documentElement.style.setProperty(
+    "--font-ui",
+    fontFamily === "system" ? '-apple-system, BlinkMacSystemFont, "SF Pro Text", "Segoe UI", sans-serif' : `"${fontFamily}", "Segoe UI", sans-serif`,
+  );
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -255,6 +297,7 @@ function escapeHtml(value: string): string {
 
 function renderSnapshot(): void {
   hotkeyHint.textContent = formatHotkey(snapshot.settings.hotkey);
+  applyFontFamily(snapshot.settings.fontFamily);
   const now = new Date();
   const variableEntries: Array<[string, string, boolean]> = [
     ["pi", String(Math.PI), false],
@@ -285,7 +328,11 @@ function renderSnapshot(): void {
   historyCount.textContent = `${snapshot.history.length} / ${snapshot.settings.historyLimit}`;
   emptyHistory.hidden = snapshot.history.length > 0;
 
-  historyList.innerHTML = snapshot.history
+  const query = historySearch.value.trim().toLocaleLowerCase();
+  const visibleHistory = snapshot.history.filter((entry) =>
+    !query || `${entry.expression} ${entry.result}`.toLocaleLowerCase().includes(query),
+  );
+  historyList.innerHTML = visibleHistory
     .map(
       (entry, index) => `
         <li>
@@ -300,7 +347,48 @@ function renderSnapshot(): void {
       `,
     )
     .join("");
+  emptyHistory.hidden = visibleHistory.length > 0;
   queueWindowFit();
+}
+
+function openSettings(): void {
+  settingHotkey.value = formatHotkey(snapshot.settings.hotkey);
+  settingAutostart.checked = snapshot.settings.autostart;
+  settingHideOnBlur.checked = snapshot.settings.hideOnBlur;
+  settingPrecision.value = String(snapshot.settings.precision);
+  precisionValue.value = settingPrecision.value;
+  settingFont.value = snapshot.settings.fontFamily;
+  settingAutoUpdate.checked = snapshot.settings.autoUpdate;
+  settingsModal.hidden = false;
+  settingHotkey.focus();
+}
+
+function closeSettings(): void { settingsModal.hidden = true; input.focus(); }
+
+function normalizeHotkey(event: KeyboardEvent): string | null {
+  const key = event.key === " " ? "Space" : event.key.length === 1 ? event.key.toUpperCase() : event.key;
+  if (["Control", "Alt", "Shift", "Meta"].includes(event.key)) return null;
+  const modifiers = [event.ctrlKey && "Ctrl", event.altKey && "Alt", event.shiftKey && "Shift", event.metaKey && "Super"].filter(Boolean);
+  return modifiers.length ? [...modifiers, key].join("+") : null;
+}
+
+async function checkForUpdates(): Promise<void> {
+  const status = requireElement<HTMLElement>("#update-status");
+  const link = requireElement<HTMLAnchorElement>("#update-link");
+  status.textContent = "正在从 GitHub 检查更新…";
+  link.hidden = true;
+  try {
+    const response = await fetch("https://api.github.com/repos/YKZStudio/QuickCalc/releases/latest", { headers: { Accept: "application/vnd.github+json" } });
+    if (!response.ok) throw new Error(`GitHub ${response.status}`);
+    const release = await response.json() as { tag_name?: string; html_url?: string };
+    const tag = release.tag_name ?? "";
+    const current = "v0.2.2";
+    if (tag && tag !== current) {
+      status.textContent = `发现新版本 ${tag}（当前 ${current}）。`;
+      link.href = release.html_url ?? "https://github.com/YKZStudio/QuickCalc/releases/latest";
+      link.hidden = false;
+    } else status.textContent = "已经是最新版本。";
+  } catch (error) { status.textContent = `检查更新失败：${String(error)}`; }
 }
 
 function queueWindowFit(): void {
@@ -507,7 +595,9 @@ async function executeCurrentCommand(command: string): Promise<void> {
   input.disabled = true;
   showStatus(i18n.t("runningCommand"));
   try {
-    const response = await commandRuntime.execute(command);
+    const response = command.trim().startsWith("/plugin") && isTauriRuntime
+      ? await executeNativePluginCommand(command)
+      : await commandRuntime.execute(command);
     if (response) {
       showCommandResult(response);
     }
@@ -585,6 +675,21 @@ async function copyLastResult(): Promise<void> {
 
 async function hideWindow(): Promise<void> {
   await invoke("hide_main_window");
+}
+
+interface PluginDescriptor { id: string; name: string; version: string; permissions: string[]; compatible: boolean; error: string | null; }
+
+async function executeNativePluginCommand(command: string): Promise<CommandResult> {
+  const [, action = "list"] = command.trim().split(/\s+/, 3);
+  const plugins = await invoke<PluginDescriptor[]>("list_plugins");
+  if (["list", "install", "update"].includes(action)) {
+    const prefix = action === "install" ? "已扫描插件目录。将插件文件夹放入" : action === "update" ? "已检查插件兼容性。" : "插件目录";
+    const lines = plugins.length
+      ? plugins.map((plugin) => `${plugin.id} ${plugin.version} · ${plugin.compatible ? "兼容" : `不可加载：${plugin.error ?? "清单错误"}`} · 权限：${plugin.permissions.join(", ") || "无"}`)
+      : ["没有发现插件。目录：%USERPROFILE%\\.quickcalc\\plugins\\<插件名称>\\plugin.json"];
+    return { title: action === "update" ? "插件更新检查" : "插件管理", lines: [prefix, ...lines] };
+  }
+  return { title: "插件管理", lines: ["支持 /plugin list、/plugin install、/plugin update。插件以隔离的清单校验方式发现；未声明的权限不会被授予。"], tone: "error" };
 }
 
 async function cleanHistory(): Promise<number> {
@@ -775,6 +880,41 @@ variablesList.addEventListener("click", (event) => {
 
 hideButton.addEventListener("click", () => {
   void hideWindow();
+});
+
+settingsButton.addEventListener("click", openSettings);
+requireElement<HTMLButtonElement>("#settings-close").addEventListener("click", closeSettings);
+requireElement<HTMLButtonElement>("#settings-cancel").addEventListener("click", closeSettings);
+settingsModal.addEventListener("mousedown", (event) => { if (event.target === settingsModal) closeSettings(); });
+settingPrecision.addEventListener("input", () => { precisionValue.value = settingPrecision.value; });
+settingHotkey.addEventListener("keydown", (event) => {
+  const hotkey = normalizeHotkey(event);
+  if (!hotkey) return;
+  event.preventDefault();
+  settingHotkey.value = formatHotkey(hotkey);
+});
+historySearch.addEventListener("input", renderSnapshot);
+requireElement<HTMLButtonElement>("#check-update").addEventListener("click", () => void checkForUpdates());
+settingsForm.addEventListener("submit", (event) => {
+  event.preventDefault();
+  const settings = {
+    hotkey: settingHotkey.value.replaceAll(" ", ""),
+    autostart: settingAutostart.checked,
+    hideOnBlur: settingHideOnBlur.checked,
+    precision: Number(settingPrecision.value),
+    fontFamily: settingFont.value,
+    autoUpdate: settingAutoUpdate.checked,
+  };
+  const save = async (): Promise<void> => {
+    const next = isTauriRuntime
+      ? await invoke<Settings>("update_settings", settings)
+      : { ...snapshot.settings, ...settings };
+    snapshot.settings = next;
+    renderSnapshot();
+    closeSettings();
+    showTransientStatus("设置已保存");
+  };
+  void save().catch((error) => showStatus(String(error), "error"));
 });
 
 if (isTauriRuntime) {

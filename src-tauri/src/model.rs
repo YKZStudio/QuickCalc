@@ -22,6 +22,9 @@ pub struct Settings {
     pub history_limit: usize,
     pub hide_on_blur: bool,
     pub color_mode: ColorMode,
+    pub precision: u8,
+    pub font_family: String,
+    pub auto_update: bool,
 }
 
 impl Default for Settings {
@@ -32,6 +35,9 @@ impl Default for Settings {
             history_limit: HISTORY_LIMIT,
             hide_on_blur: true,
             color_mode: ColorMode::Auto,
+            precision: 12,
+            font_family: "system".to_owned(),
+            auto_update: true,
         }
     }
 }
@@ -43,6 +49,10 @@ impl Settings {
         }
         // Product requirement: persisted history is always migrated to the current limit.
         self.history_limit = HISTORY_LIMIT;
+        self.precision = self.precision.clamp(0, 15);
+        if self.font_family.trim().is_empty() {
+            self.font_family = "system".to_owned();
+        }
         self
     }
 }
