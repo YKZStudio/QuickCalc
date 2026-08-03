@@ -116,8 +116,19 @@ function Invoke-SignTool {
 
     Write-SigningDiagnostic "Signing $([System.IO.Path]::GetFileName($resolvedTarget)): $Description"
     $commandArguments = @($Arguments) + $resolvedTarget
-    $signOutput = & $signTool @commandArguments 2>&1
-    $exitCode = $LASTEXITCODE
+    # signtool writes ordinary failures to stderr. Do not let PowerShell turn that
+    # native stderr into a terminating error before it can be recorded or retried.
+    $previousErrorActionPreference = $ErrorActionPreference
+    $previousNativeCommandPreference = $PSNativeCommandUseErrorActionPreference
+    $ErrorActionPreference = "Continue"
+    $PSNativeCommandUseErrorActionPreference = $false
+    try {
+        $signOutput = & $signTool @commandArguments 2>&1
+        $exitCode = $LASTEXITCODE
+    } finally {
+        $ErrorActionPreference = $previousErrorActionPreference
+        $PSNativeCommandUseErrorActionPreference = $previousNativeCommandPreference
+    }
     foreach ($line in @($signOutput)) {
         Write-SigningDiagnostic ([string]$line)
     }
