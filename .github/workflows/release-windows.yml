@@ -14,8 +14,16 @@ concurrency:
 
 jobs:
   publish:
-    name: Build and publish Windows x64 installers
-    runs-on: windows-latest
+    name: Build and publish Windows ${{ matrix.arch }} installers
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x64
+            target: x86_64-pc-windows-msvc
+          - arch: arm64
+            target: aarch64-pc-windows-msvc
+    runs-on: windows-2022
     timeout-minutes: 45
     steps:
       - name: Check out repository
@@ -30,7 +38,7 @@ jobs:
       - name: Set up Rust
         uses: dtolnay/rust-toolchain@stable
         with:
-          targets: x86_64-pc-windows-msvc
+          targets: ${{ matrix.target }}
 
       - name: Cache Rust dependencies
         uses: Swatinem/rust-cache@v2
@@ -79,19 +87,21 @@ jobs:
           tagName: ${{ github.ref_name }}
           releaseName: QuickCalc ${{ github.ref_name }}
           releaseBody: |
-            Windows x64 安装包：
+            Windows x64 与 ARM64 安装包：
             - NSIS `.exe`：适合普通用户安装
             - MSI：适合企业部署或系统管理员
 
             应用主程序、NSIS 安装程序与 MSI 均使用项目的 Windows 证书进行 Authenticode 签名。
             当前使用自签名证书；未信任该证书的设备仍可能显示发布者或 SmartScreen 警告。
+
+            * 特别说明：ARM64 版本未经实机验证，可能出现故障或问题。
           generateReleaseNotes: true
           releaseDraft: false
           prerelease: ${{ contains(github.ref_name, '-') }}
           uploadUpdaterJson: false
           retryAttempts: 2
-          releaseAssetNamePattern: QuickCalc_[version]_windows_x64_[bundle].[ext]
-          args: --ci --target x86_64-pc-windows-msvc --bundles nsis,msi
+          releaseAssetNamePattern: QuickCalc_[version]_windows_${{ matrix.arch }}_[bundle].[ext]
+          args: --ci --target ${{ matrix.target }} --bundles nsis,msi
 
       - name: Remove temporary signing certificate
         if: always()
