@@ -59,3 +59,27 @@ test("localizes built-in commands and falls back to American English", async () 
   assert.equal((await english.execute("/help"))?.title, "QuickCalc Help");
   assert.equal((await english.execute("/plugin list"))?.lines[0], "No plugins are currently loaded.");
 });
+
+test("cleans history and persists color modes through application actions", async () => {
+  let colorMode: "auto" | "light" | "dark" = "auto";
+  let cleanCalls = 0;
+  const runtime = createCommandRuntime(createI18n("zh-CN"), {
+    cleanHistory: async () => {
+      cleanCalls += 1;
+      return 7;
+    },
+    getColorMode: () => colorMode,
+    setColorMode: async (mode) => {
+      colorMode = mode;
+    },
+  });
+
+  assert.equal((await runtime.execute("/clean"))?.lines[0], "已清空 7 条历史记录。");
+  assert.equal(cleanCalls, 1);
+  assert.equal((await runtime.execute("/clean now"))?.tone, "error");
+  assert.equal((await runtime.execute("/color"))?.lines[0], "当前颜色模式：自动。");
+  assert.equal((await runtime.execute("/color dark"))?.tone, "success");
+  assert.equal(colorMode, "dark");
+  assert.equal((await runtime.execute("/color"))?.lines[0], "当前颜色模式：暗色。");
+  assert.equal((await runtime.execute("/color blue"))?.tone, "error");
+});

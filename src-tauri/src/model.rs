@@ -2,8 +2,17 @@ use std::collections::HashMap;
 
 use serde::{Deserialize, Serialize};
 
-pub const HISTORY_LIMIT: usize = 50;
+pub const HISTORY_LIMIT: usize = 100;
 pub const DEFAULT_HOTKEY: &str = "Ctrl+Shift+Space";
+
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ColorMode {
+    #[default]
+    Auto,
+    Light,
+    Dark,
+}
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 #[serde(default, rename_all = "camelCase")]
@@ -12,6 +21,7 @@ pub struct Settings {
     pub autostart: bool,
     pub history_limit: usize,
     pub hide_on_blur: bool,
+    pub color_mode: ColorMode,
 }
 
 impl Default for Settings {
@@ -21,6 +31,7 @@ impl Default for Settings {
             autostart: true,
             history_limit: HISTORY_LIMIT,
             hide_on_blur: true,
+            color_mode: ColorMode::Auto,
         }
     }
 }
@@ -30,7 +41,7 @@ impl Settings {
         if self.hotkey.trim().is_empty() {
             self.hotkey = DEFAULT_HOTKEY.to_owned();
         }
-        // Product requirement: the persisted history is bounded to exactly 50 entries.
+        // Product requirement: persisted history is always migrated to the current limit.
         self.history_limit = HISTORY_LIMIT;
         self
     }
@@ -89,6 +100,39 @@ pub fn is_builtin(name: &str) -> bool {
         name.to_ascii_lowercase().as_str(),
         "pi" | "e" | "res" | "tmstamp" | "tmlocal" | "tmutc"
     )
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{ColorMode, RuntimeData, Settings, HISTORY_LIMIT};
+
+    #[test]
+    fn settings_migrate_to_the_current_history_limit_and_default_color_mode() {
+        let settings: Settings = serde_json::from_str(
+            r#"{"hotkey":"Ctrl+Shift+Space","autostart":true,"historyLimit":50,"hideOnBlur":true}"#,
+        )
+        .expect("legacy settings should deserialize");
+        let settings = settings.normalize();
+
+        assert_eq!(settings.history_limit, HISTORY_LIMIT);
+        assert_eq!(settings.color_mode, ColorMode::Auto);
+    }
+
+    #[test]
+    fn runtime_history_is_bounded_to_one_hundred_entries() {
+        let mut runtime = RuntimeData::default();
+        runtime.history = (0..125)
+            .map(|index| super::HistoryEntry {
+                id: index.to_string(),
+                timestamp_ms: index,
+                expression: index.to_string(),
+                result: index.to_string(),
+                value: Some(index as f64),
+            })
+            .collect();
+
+        assert_eq!(runtime.normalize().history.len(), HISTORY_LIMIT);
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]

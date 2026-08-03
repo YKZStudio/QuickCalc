@@ -2,6 +2,13 @@ import { PluginManager } from "./plugins.ts";
 import { createI18n, type I18n } from "./i18n.ts";
 
 export type CommandTone = "info" | "success" | "error";
+export type ColorMode = "auto" | "light" | "dark";
+
+export interface AppCommandActions {
+  cleanHistory(): Promise<number>;
+  getColorMode(): ColorMode;
+  setColorMode(mode: ColorMode): Promise<void>;
+}
 
 export interface CommandResult {
   title: string;
@@ -100,7 +107,14 @@ export class CommandRegistry {
   }
 }
 
-export function createCommandRuntime(i18n = createI18n()): CommandRuntime {
+export function createCommandRuntime(
+  i18n = createI18n(),
+  actions: AppCommandActions = {
+    cleanHistory: async () => 0,
+    getColorMode: () => "auto",
+    setColorMode: async () => undefined,
+  },
+): CommandRuntime {
   const commands = new CommandRegistry(i18n);
   const plugins = new PluginManager(commands, i18n);
 
@@ -145,11 +159,67 @@ export function createCommandRuntime(i18n = createI18n()): CommandRuntime {
     execute: ({ args }) => executePluginCommand(plugins, args, i18n),
   });
 
+  commands.register({
+    name: "clean",
+    summary: i18n.t("cleanSummary"),
+    usage: i18n.t("cleanUsage"),
+    execute: async ({ args }) => {
+      if (args.length > 0) {
+        return errorResult(i18n.t("cleanArgumentsInvalid"), [
+          i18n.t("usageLine", { usage: i18n.t("cleanUsage") }),
+        ]);
+      }
+      const removed = await actions.cleanHistory();
+      return {
+        title: i18n.t("cleanTitle"),
+        lines: [i18n.t("cleanRemoved", { count: removed })],
+        tone: "success",
+      };
+    },
+  });
+
+  commands.register({
+    name: "color",
+    summary: i18n.t("colorSummary"),
+    usage: i18n.t("colorUsage"),
+    execute: async ({ args }) => {
+      if (args.length === 0) {
+        const current = actions.getColorMode();
+        return {
+          title: i18n.t("colorTitle"),
+          lines: [i18n.t("colorCurrent", { mode: colorModeLabel(current, i18n) })],
+        };
+      }
+      const requested = args[0]?.toLowerCase();
+      if (args.length !== 1 || !isColorMode(requested)) {
+        return errorResult(i18n.t("colorInvalid"), [
+          i18n.t("usageLine", { usage: i18n.t("colorUsage") }),
+        ]);
+      }
+      await actions.setColorMode(requested);
+      return {
+        title: i18n.t("colorTitle"),
+        lines: [i18n.t("colorChanged", { mode: colorModeLabel(requested, i18n) })],
+        tone: "success",
+      };
+    },
+  });
+
   return {
     commands,
     plugins,
     execute: (input) => commands.execute(input),
   };
+}
+
+function isColorMode(value: string | undefined): value is ColorMode {
+  return value === "auto" || value === "light" || value === "dark";
+}
+
+function colorModeLabel(mode: ColorMode, i18n: I18n): string {
+  return i18n.t(
+    mode === "auto" ? "colorModeAuto" : mode === "light" ? "colorModeLight" : "colorModeDark",
+  );
 }
 
 function parseCommand(input: string): CommandInvocation | null {

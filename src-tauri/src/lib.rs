@@ -149,6 +149,8 @@ pub fn run() {
         })
         .invoke_handler(tauri::generate_handler![
             commands::get_snapshot,
+            commands::clean_history,
+            commands::set_color_mode,
             commands::evaluate_expression,
             commands::hide_main_window,
             commands::quit_app,

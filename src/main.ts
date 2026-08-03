@@ -1,17 +1,18 @@
 import { invoke } from "@tauri-apps/api/core";
-import { getCurrentWindow } from "@tauri-apps/api/window";
+import { LogicalSize } from "@tauri-apps/api/dpi";
+import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
-
 import { applyBracketKey, completeTrailingBrackets } from "./brackets.ts";
-import { createCommandRuntime, type CommandResult } from "./commands.ts";
+import { createCommandRuntime, type ColorMode, type CommandResult } from "./commands.ts";
 import {
   applyCompletion,
-  DATA_OPERATIONS,
   getCompletionSuggestions,
+  type CompletionCandidate,
   type CompletionSuggestion,
 } from "./completion.ts";
 import { createI18n } from "./i18n.ts";
 import { normalizeExpressionInput } from "./input-normalization.ts";
+import { resolveSubmission } from "./submission.ts";
 import "./styles.css";
 
 interface Settings {
@@ -19,6 +20,7 @@ interface Settings {
   autostart: boolean;
   historyLimit: number;
   hideOnBlur: boolean;
+  colorMode: ColorMode;
 }
 
 interface HistoryEntry {
@@ -47,8 +49,9 @@ interface EvaluationResponse {
 const i18n = createI18n();
 const isTauriRuntime = "__TAURI_INTERNALS__" in window;
 const previewParameters = new URLSearchParams(window.location.search);
-if (!isTauriRuntime && previewParameters.get("theme") === "light") {
-  document.documentElement.dataset.previewTheme = "light";
+const previewTheme = previewParameters.get("theme");
+if (!isTauriRuntime && (previewTheme === "light" || previewTheme === "dark")) {
+  document.documentElement.dataset.colorMode = previewTheme;
 }
 document.documentElement.lang = i18n.locale;
 document.querySelector<HTMLMetaElement>('meta[name="description"]')?.setAttribute(
@@ -64,13 +67,23 @@ if (!root) {
 root.innerHTML = `
   <section class="shell" aria-label="QuickCalc">
     <header class="titlebar" data-tauri-drag-region>
+      <div class="window-controls">
+        <button id="hide-button" class="traffic-control traffic-control--close" type="button" title="${escapeHtml(i18n.t("hideTitle"))}" aria-label="${escapeHtml(i18n.t("hideTitle"))}">
+          <i class="ph-fill ph-circle" aria-hidden="true"></i>
+        </button>
+        <span class="traffic-control traffic-control--hide" aria-hidden="true">
+          <i class="ph-fill ph-circle" aria-hidden="true"></i>
+        </span>
+        <span class="traffic-control traffic-control--fixed" aria-hidden="true">
+          <i class="ph-fill ph-circle"></i>
+        </span>
+      </div>
       <div class="brand" data-tauri-drag-region>
-        <span class="brand-mark" aria-hidden="true">Q</span>
         <span data-tauri-drag-region>QuickCalc</span>
       </div>
       <div class="title-actions">
         <span id="hotkey-hint" class="key-hint">Ctrl + Shift + Space</span>
-        <button id="quit-button" class="icon-button" type="button" title="${escapeHtml(i18n.t("quitTitle"))}" aria-label="${escapeHtml(i18n.t("quitTitle"))}">×</button>
+        <button id="quit-button" class="quit-button" type="button" title="${escapeHtml(i18n.t("quitTitle"))}">${escapeHtml(i18n.t("quitLabel"))}</button>
       </div>
     </header>
 
@@ -79,7 +92,7 @@ root.innerHTML = `
         <label class="sr-only" for="expression">${escapeHtml(i18n.t("expressionLabel"))}</label>
         <div class="input-stack">
           <div class="input-row">
-            <span class="prompt" aria-hidden="true">›</span>
+            <i class="ph ph-caret-right prompt" aria-hidden="true"></i>
             <input
               id="expression"
               name="expression"
@@ -105,25 +118,34 @@ root.innerHTML = `
             <strong id="command-title" class="command-title"></strong>
             <ul id="command-lines" class="command-lines"></ul>
           </div>
-          <span id="status" class="status">${escapeHtml(i18n.t("waiting"))}</span>
+          <div class="status-row">
+            <i id="status-icon" class="ph-fill ph-check-circle status-icon" aria-hidden="true" hidden></i>
+            <span id="status" class="status">${escapeHtml(i18n.t("waiting"))}</span>
+          </div>
         </div>
-        <p id="interaction-hint" class="interaction-hint">${escapeHtml(i18n.t("interactionHint"))}</p>
+        <section class="variables-panel" aria-label="${escapeHtml(i18n.t("variables"))}">
+          <div class="section-heading">${escapeHtml(i18n.t("variables"))}</div>
+          <div id="variables" class="variables-list"></div>
+        </section>
+        <div class="interaction-hint">
+          <i class="ph ph-keyboard" aria-hidden="true"></i>
+          <p id="interaction-hint-text">${escapeHtml(i18n.t("interactionHint"))}</p>
+        </div>
       </form>
 
       <aside class="side-panel" aria-label="${escapeHtml(i18n.t("recentHistory"))}">
         <div class="side-heading">
           <span>${escapeHtml(i18n.t("recentCalculations"))}</span>
-          <span id="history-count" class="count">0 / 50</span>
+          <span id="history-count" class="count">0 / 100</span>
         </div>
         <ol id="history" class="history"></ol>
         <div id="empty-history" class="empty-history">${escapeHtml(i18n.t("emptyHistory"))}</div>
+        <div class="side-save">
+          <i class="ph ph-cloud-arrow-down" aria-hidden="true"></i>
+          <span>${escapeHtml(i18n.t("localAutoSave"))}</span>
+        </div>
       </aside>
     </div>
-
-    <footer class="footer">
-      <span id="variable-summary">pi · e · res · tmstamp · tmlocal · tmutc</span>
-      <span>${escapeHtml(i18n.t("localAutoSave"))}</span>
-    </footer>
   </section>
 `;
 
@@ -137,20 +159,29 @@ const commandPanel = requireElement<HTMLElement>("#command-panel");
 const commandTitle = requireElement<HTMLElement>("#command-title");
 const commandLines = requireElement<HTMLUListElement>("#command-lines");
 const status = requireElement<HTMLElement>("#status");
+const statusIcon = requireElement<HTMLElement>("#status-icon");
 const historyList = requireElement<HTMLOListElement>("#history");
 const historyCount = requireElement<HTMLElement>("#history-count");
 const emptyHistory = requireElement<HTMLElement>("#empty-history");
+const variablesList = requireElement<HTMLElement>("#variables");
 const hotkeyHint = requireElement<HTMLElement>("#hotkey-hint");
-const variableSummary = requireElement<HTMLElement>("#variable-summary");
 const quitButton = requireElement<HTMLButtonElement>("#quit-button");
-const commandRuntime = createCommandRuntime(i18n);
+const hideButton = requireElement<HTMLButtonElement>("#hide-button");
+const titlebar = requireElement<HTMLElement>(".titlebar");
+const sidePanel = requireElement<HTMLElement>(".side-panel");
+const commandRuntime = createCommandRuntime(i18n, {
+  cleanHistory,
+  getColorMode: () => snapshot.settings.colorMode,
+  setColorMode,
+});
 
 let snapshot: Snapshot = {
   settings: {
     hotkey: "Ctrl+Shift+Space",
     autostart: true,
-    historyLimit: 50,
+    historyLimit: 100,
     hideOnBlur: true,
+    colorMode: "auto",
   },
   history: [],
   variables: {},
@@ -164,6 +195,8 @@ let composing = false;
 let toastTimer: number | undefined;
 let completionSuggestions: CompletionSuggestion[] = [];
 let activeCompletionIndex = 0;
+let resizeFrame = 0;
+let resizeGeneration = 0;
 
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -184,6 +217,25 @@ function formatTime(timestampMs: number): string {
   }).format(new Date(timestampMs));
 }
 
+function formatDateTime(date: Date, utc = false): string {
+  const year = utc ? date.getUTCFullYear() : date.getFullYear();
+  const month = utc ? date.getUTCMonth() : date.getMonth();
+  const day = utc ? date.getUTCDate() : date.getDate();
+  const hours = utc ? date.getUTCHours() : date.getHours();
+  const minutes = utc ? date.getUTCMinutes() : date.getMinutes();
+  const seconds = utc ? date.getUTCSeconds() : date.getSeconds();
+  const pad = (value: number) => String(value).padStart(2, "0");
+  return `${year}-${pad(month + 1)}-${pad(day)} ${pad(hours)}:${pad(minutes)}:${pad(seconds)}`;
+}
+
+function applyColorMode(mode: ColorMode): void {
+  if (mode === "auto") {
+    delete document.documentElement.dataset.colorMode;
+  } else {
+    document.documentElement.dataset.colorMode = mode;
+  }
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -195,24 +247,36 @@ function escapeHtml(value: string): string {
 
 function renderSnapshot(): void {
   hotkeyHint.textContent = formatHotkey(snapshot.settings.hotkey);
-  const variableNames = Object.keys(snapshot.variables).sort();
-  variableSummary.textContent = [
-    "pi",
-    "e",
-    "res",
-    "tmstamp",
-    "tmlocal",
-    "tmutc",
-    ...variableNames,
-  ].join(" · ");
+  const now = new Date();
+  const variableEntries: Array<[string, string]> = [
+    ["pi", String(Math.PI)],
+    ["e", String(Math.E)],
+    ["res", String(snapshot.res)],
+    ["tmstamp", String(Math.floor(now.getTime() / 1000))],
+    ["tmlocal", formatDateTime(now)],
+    ["tmutc", formatDateTime(now, true)],
+    ...Object.keys(snapshot.variables)
+      .sort()
+      .map((name): [string, string] => [name, String(snapshot.variables[name])]),
+  ];
+  variablesList.innerHTML = variableEntries
+    .map(
+      ([name, value]) => `
+        <div class="variable-row">
+          <span>${escapeHtml(name)}</span>
+          <span title="${escapeHtml(value)}">${escapeHtml(value)}</span>
+        </div>
+      `,
+    )
+    .join("");
   historyCount.textContent = `${snapshot.history.length} / ${snapshot.settings.historyLimit}`;
   emptyHistory.hidden = snapshot.history.length > 0;
 
   historyList.innerHTML = snapshot.history
     .map(
-      (entry) => `
+      (entry, index) => `
         <li>
-          <button class="history-item" type="button" data-expression="${escapeHtml(entry.expression)}">
+          <button class="history-item${index === 0 ? " is-current" : ""}" type="button" data-expression="${escapeHtml(entry.expression)}">
             <span class="history-main">
               <span class="history-expression">${escapeHtml(entry.expression)}</span>
               <span class="history-result">${escapeHtml(entry.result)}</span>
@@ -223,11 +287,67 @@ function renderSnapshot(): void {
       `,
     )
     .join("");
+  queueWindowFit();
+}
+
+function queueWindowFit(): void {
+  if (!isTauriRuntime) {
+    return;
+  }
+  window.cancelAnimationFrame(resizeFrame);
+  resizeFrame = window.requestAnimationFrame(() => void fitWindowToContent());
+}
+
+async function fitWindowToContent(): Promise<void> {
+  const generation = ++resizeGeneration;
+  const appWindow = getCurrentWindow();
+  const scaleFactor = await appWindow.scaleFactor();
+  const physicalSize = await appWindow.innerSize();
+  const physicalPosition = await appWindow.outerPosition();
+  const currentWidth = physicalSize.width / scaleFactor;
+  const currentHeight = physicalSize.height / scaleFactor;
+  const contentHeight = titlebar.offsetHeight + Math.max(form.scrollHeight, sidePanel.scrollHeight) + 2;
+  let targetHeight = Math.min(860, Math.max(460, Math.ceil(contentHeight)));
+  const monitor = await currentMonitor();
+  if (monitor) {
+    const availableBelow =
+      (monitor.workArea.position.y + monitor.workArea.size.height - physicalPosition.y) /
+        scaleFactor -
+      12;
+    targetHeight = Math.min(targetHeight, Math.max(460, availableBelow));
+  }
+  if (targetHeight <= currentHeight + 1 || generation !== resizeGeneration) {
+    return;
+  }
+
+  const reducedMotion = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+  if (reducedMotion) {
+    await appWindow.setSize(new LogicalSize(currentWidth, targetHeight));
+    return;
+  }
+
+  const duration = 320;
+  const startedAt = performance.now();
+  const animate = async (timestamp: number): Promise<void> => {
+    if (generation !== resizeGeneration) {
+      return;
+    }
+    const progress = Math.min(1, (timestamp - startedAt) / duration);
+    const eased = 1 - Math.pow(1 - progress, 4);
+    const height = currentHeight + (targetHeight - currentHeight) * eased;
+    await appWindow.setSize(new LogicalSize(currentWidth, height));
+    if (progress < 1 && generation === resizeGeneration) {
+      window.requestAnimationFrame((nextTimestamp) => void animate(nextTimestamp));
+    }
+  };
+  window.requestAnimationFrame((timestamp) => void animate(timestamp));
 }
 
 function showStatus(message: string, kind: "idle" | "success" | "error" = "idle"): void {
   status.textContent = message;
   resultPanel.dataset.kind = kind;
+  statusIcon.hidden = kind === "idle";
+  statusIcon.className = `ph-fill ${kind === "error" ? "ph-warning-circle" : "ph-check-circle"} status-icon`;
 }
 
 function showTransientStatus(message: string): void {
@@ -244,21 +364,48 @@ function showNumericResult(value: string): void {
     value.length <= 12 ? "regular" : value.length <= 20 ? "compact" : value.length <= 32 ? "dense" : "wrap";
 }
 
-function variableNames(): string[] {
-  return ["pi", "e", "res", "tmstamp", "tmlocal", "tmutc", ...Object.keys(snapshot.variables)];
+function variableCandidates(): CompletionCandidate[] {
+  return [
+    { name: "pi", description: i18n.t("completionPi") },
+    { name: "e", description: i18n.t("completionE") },
+    { name: "res", description: i18n.t("completionRes") },
+    { name: "tmstamp", description: i18n.t("completionTimestamp") },
+    { name: "tmlocal", description: i18n.t("completionLocalTime") },
+    { name: "tmutc", description: i18n.t("completionUtcTime") },
+    ...Object.keys(snapshot.variables).map((name) => ({
+      name,
+      description: i18n.t("completionUserVariable"),
+    })),
+  ];
 }
 
-function commandNames(): string[] {
-  return commandRuntime.commands.list().map((command) => command.name);
+function commandCandidates(): CompletionCandidate[] {
+  return commandRuntime.commands.list().map((command) => ({
+    name: command.name,
+    description: command.summary,
+  }));
+}
+
+function operationCandidates(): CompletionCandidate[] {
+  return [
+    { name: "ascii", description: i18n.t("completionAscii") },
+    { name: "base64", description: i18n.t("completionBase64") },
+    { name: "bin", description: i18n.t("completionBin") },
+    { name: "dec", description: i18n.t("completionDec") },
+    { name: "dex", description: i18n.t("completionDec") },
+    { name: "hex", description: i18n.t("completionHex") },
+    { name: "oct", description: i18n.t("completionOct") },
+    { name: "tostr", description: i18n.t("completionToString") },
+  ];
 }
 
 function refreshCompletions(): void {
   completionSuggestions = getCompletionSuggestions(
     input.value,
     input.selectionStart ?? input.value.length,
-    variableNames(),
-    commandNames(),
-    DATA_OPERATIONS,
+    variableCandidates(),
+    commandCandidates(),
+    operationCandidates(),
   );
   activeCompletionIndex = 0;
   renderCompletions();
@@ -281,15 +428,16 @@ function renderCompletions(): void {
       button.dataset.completionIndex = String(index);
       button.setAttribute("role", "option");
       button.setAttribute("aria-selected", String(index === activeCompletionIndex));
-      button.innerHTML = `<span>${escapeHtml(suggestion.label)}</span><small>${escapeHtml(
+      const description =
+        suggestion.description ??
         i18n.t(
           suggestion.kind === "command"
             ? "completionCommand"
             : suggestion.kind === "operation"
               ? "completionOperation"
               : "completionVariable",
-        ),
-      )}</small>`;
+        );
+      button.innerHTML = `<span>${escapeHtml(suggestion.label)}</span><small>${escapeHtml(description)}</small>`;
       if (index === activeCompletionIndex) {
         input.setAttribute("aria-activedescendant", id);
       }
@@ -333,6 +481,7 @@ function showCommandResult(response: CommandResult): void {
     i18n.t(response.tone === "error" ? "commandNotExecuted" : "commandExecuted"),
     response.tone === "error" ? "error" : response.tone === "success" ? "success" : "idle",
   );
+  queueWindowFit();
 }
 
 async function executeCurrentCommand(command: string): Promise<void> {
@@ -357,14 +506,12 @@ async function executeCurrentCommand(command: string): Promise<void> {
   }
 }
 
-async function evaluateCurrentExpression(): Promise<void> {
-  normalizeCurrentInput();
-  const completed = completeTrailingBrackets(input.value.trim());
+async function evaluateCurrentExpression(expression: string): Promise<void> {
+  const completed = completeTrailingBrackets(expression.trim());
   if (!completed || busy) {
     return;
   }
 
-  input.value = completed;
   busy = true;
   input.disabled = true;
   showStatus(i18n.t("calculating"));
@@ -421,19 +568,43 @@ async function hideWindow(): Promise<void> {
   await invoke("hide_main_window");
 }
 
+async function cleanHistory(): Promise<number> {
+  const removed = isTauriRuntime
+    ? await invoke<number>("clean_history")
+    : snapshot.history.length;
+  snapshot.history = [];
+  renderSnapshot();
+  return removed;
+}
+
+async function setColorMode(mode: ColorMode): Promise<void> {
+  if (isTauriRuntime) {
+    await invoke<ColorMode>("set_color_mode", { mode });
+  }
+  snapshot.settings.colorMode = mode;
+  applyColorMode(mode);
+  queueWindowFit();
+}
+
 form.addEventListener("submit", (event) => {
   event.preventDefault();
-  const currentInput = input.value.trim();
-  if (currentInput.startsWith("/")) {
-    void executeCurrentCommand(currentInput);
+  normalizeCurrentInput();
+  const action = resolveSubmission(input.value, readyToCopy);
+  if (action.kind === "none") {
     return;
   }
-  const unchanged = input.value.trim() === lastSubmittedExpression;
-  if (readyToCopy && unchanged) {
+  if (action.kind === "copy") {
     void copyLastResult();
     return;
   }
-  void evaluateCurrentExpression();
+
+  input.value = "";
+  dismissCompletions();
+  if (action.kind === "command") {
+    void executeCurrentCommand(action.value);
+    return;
+  }
+  void evaluateCurrentExpression(action.value);
 });
 
 function normalizeCurrentInput(): void {
@@ -538,6 +709,10 @@ quitButton.addEventListener("click", () => {
   void invoke("quit_app");
 });
 
+hideButton.addEventListener("click", () => {
+  void hideWindow();
+});
+
 if (isTauriRuntime) {
   getCurrentWindow().onFocusChanged(({ payload: focused }) => {
     if (focused) {
@@ -554,6 +729,28 @@ if (isTauriRuntime) {
 
 async function bootstrap(): Promise<void> {
   if (!isTauriRuntime) {
+    if (previewTheme !== "light" && previewTheme !== "dark") {
+      applyColorMode(snapshot.settings.colorMode);
+    }
+    if (previewParameters.get("preview") === "design") {
+      const now = new Date("2026-08-03T10:42:00+08:00").getTime();
+      snapshot = {
+        ...snapshot,
+        res: 216.91,
+        variables: { tax: 0.09 },
+        history: [
+          { id: "preview-1", timestampMs: now, expression: "199 * (1 + tax)", result: "216.91", value: 216.91 },
+          { id: "preview-2", timestampMs: now - 60_000, expression: "15% of 199", result: "29.85", value: 29.85 },
+          { id: "preview-3", timestampMs: now - 180_000, expression: "sqrt(144) + 2^3", result: "20", value: 20 },
+        ],
+      };
+      input.value = "199 * (1 + tax)";
+      renderSnapshot();
+      showNumericResult("216.91");
+      showStatus(i18n.t("resultReady"), "success");
+      input.focus();
+      return;
+    }
     renderSnapshot();
     if (previewParameters.get("preview") === "long-result") {
       showNumericResult("2026-08-02 19:17:28");
@@ -567,6 +764,7 @@ async function bootstrap(): Promise<void> {
 
   try {
     snapshot = await invoke<Snapshot>("get_snapshot");
+    applyColorMode(snapshot.settings.colorMode);
     renderSnapshot();
     if (snapshot.history[0]) {
       showNumericResult(snapshot.history[0].result);

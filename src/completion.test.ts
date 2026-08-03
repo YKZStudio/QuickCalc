@@ -7,12 +7,27 @@ const variables = ["pi", "e", "res", "tmstamp", "tmlocal", "tmutc", "tax"];
 const commands = ["help", "plugin"];
 
 test("completes slash commands", () => {
-  const suggestions = getCompletionSuggestions("/he", 3, variables, commands);
+  const suggestions = getCompletionSuggestions("/he", 3, variables, [
+    { name: "help", description: "Show help" },
+    "plugin",
+  ]);
   assert.deepEqual(suggestions.map(({ label }) => label), ["/help"]);
+  assert.equal(suggestions[0]?.description, "Show help");
   assert.deepEqual(applyCompletion("/he", suggestions[0]!), {
     value: "/help",
     cursor: 5,
   });
+});
+
+test("keeps descriptions attached to matching variable candidates", () => {
+  const suggestions = getCompletionSuggestions(
+    "p",
+    1,
+    [{ name: "pi", description: "圆周率" }],
+    commands,
+  );
+  assert.equal(suggestions[0]?.label, "pi");
+  assert.equal(suggestions[0]?.description, "圆周率");
 });
 
 test("completes variables at the caret without replacing the expression", () => {

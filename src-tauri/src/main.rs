@@ -3,4 +3,3 @@
 fn main() {
     quickcalc_lib::run();
 }
-

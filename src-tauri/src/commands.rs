@@ -6,12 +6,51 @@ use crate::{
     app_state::AppState,
     evaluator::Evaluator,
     i18n::tr,
-    model::{EvaluationResponse, HistoryEntry, Snapshot, HISTORY_LIMIT},
+    model::{ColorMode, EvaluationResponse, HistoryEntry, Snapshot, HISTORY_LIMIT},
 };
 
 #[tauri::command]
 pub fn get_snapshot(state: State<'_, AppState>) -> Result<Snapshot, String> {
     state.snapshot()
+}
+
+#[tauri::command]
+pub fn clean_history(state: State<'_, AppState>) -> Result<usize, String> {
+    let locale = state.locale;
+    let mut runtime = state.runtime.lock().map_err(|_| {
+        locale
+            .text(
+                "运行状态锁已损坏",
+                "執行階段狀態鎖已損壞",
+                "The runtime state lock is corrupted",
+            )
+            .to_owned()
+    })?;
+    let removed = runtime.history.len();
+    let mut updated = runtime.clone();
+    updated.history.clear();
+    state.storage.save_runtime(&updated)?;
+    *runtime = updated;
+    Ok(removed)
+}
+
+#[tauri::command]
+pub fn set_color_mode(mode: ColorMode, state: State<'_, AppState>) -> Result<ColorMode, String> {
+    let locale = state.locale;
+    let mut settings = state.settings.lock().map_err(|_| {
+        locale
+            .text(
+                "设置状态锁已损坏",
+                "設定狀態鎖已損壞",
+                "The settings state lock is corrupted",
+            )
+            .to_owned()
+    })?;
+    let mut updated = settings.clone();
+    updated.color_mode = mode;
+    state.storage.save_settings(&updated)?;
+    *settings = updated;
+    Ok(mode)
 }
 
 #[tauri::command]

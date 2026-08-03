@@ -1,6 +1,6 @@
 [package]
 name = "quickcalc"
-version = "0.1.2"
+version = "0.2.0"
 description = "A fast, keyboard-first desktop calculator"
 authors = ["QuickCalc contributors"]
 edition = "2021"
