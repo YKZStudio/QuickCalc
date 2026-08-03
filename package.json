@@ -1,14 +1,14 @@
 {
   "name": "quickcalc",
   "private": true,
-  "version": "0.2.0",
+  "version": "0.2.1",
   "type": "module",
   "scripts": {
     "dev": "vite --port 1420 --strictPort",
     "build": "tsc --noEmit && vite build",
     "preview": "vite preview",
     "typecheck": "tsc --noEmit",
-    "test": "node --test src/brackets.test.ts src/commands.test.ts src/completion.test.ts src/i18n.test.ts src/input-normalization.test.ts src/submission.test.ts",
+    "test": "node --test src/brackets.test.ts src/commands.test.ts src/completion.test.ts src/history-navigation.test.ts src/i18n.test.ts src/input-normalization.test.ts src/submission.test.ts",
     "release:check": "node scripts/check-release-version.mjs",
     "tauri": "tauri"
   },

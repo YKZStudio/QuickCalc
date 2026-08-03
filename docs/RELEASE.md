@@ -39,7 +39,7 @@ GitHub Actions 不读取仓库中的 PFX。先在本地把证书转换为 Base64
 2. 在本地运行：
 
    ```bash
-   RELEASE_TAG=v0.2.0 npm run release:check
+   RELEASE_TAG=v0.2.1 npm run release:check
    npm test
    npm run build
    ```
@@ -48,8 +48,8 @@ GitHub Actions 不读取仓库中的 PFX。先在本地把证书转换为 Base64
 4. 从该 `main` 提交创建并推送语义化版本标签：
 
    ```bash
-   git tag v0.2.0
-   git push origin v0.2.0
+   git tag v0.2.1
+   git push origin v0.2.1
    ```
 
 5. 在仓库 Actions 页面查看 `Release Windows`。成功后，Release 页面会出现：

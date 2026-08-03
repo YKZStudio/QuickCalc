@@ -14,6 +14,7 @@ test("ignores calculator expressions and handles built-in help", async () => {
   assert.ok(help?.lines.some((line) => line.includes("tmlocal")));
   assert.ok(help?.lines.some((line) => line.includes("Hello.ascii")));
   assert.ok(help?.lines.some((line) => line.includes("base64")));
+  assert.ok(help?.lines.some((line) => line.includes("/del")));
   assert.ok(help?.lines.some((line) => line.includes("/plugin")));
 });
 
@@ -68,6 +69,7 @@ test("cleans history and persists color modes through application actions", asyn
       cleanCalls += 1;
       return 7;
     },
+    deleteVariable: async () => false,
     getColorMode: () => colorMode,
     setColorMode: async (mode) => {
       colorMode = mode;
@@ -82,4 +84,27 @@ test("cleans history and persists color modes through application actions", asyn
   assert.equal(colorMode, "dark");
   assert.equal((await runtime.execute("/color"))?.lines[0], "当前颜色模式：暗色。");
   assert.equal((await runtime.execute("/color blue"))?.tone, "error");
+});
+
+test("deletes user variables while protecting built-ins", async () => {
+  const variables = new Set(["tax"]);
+  const deleted: string[] = [];
+  const runtime = createCommandRuntime(createI18n("zh-CN"), {
+    cleanHistory: async () => 0,
+    deleteVariable: async (name) => {
+      deleted.push(name);
+      return variables.delete(name);
+    },
+    getColorMode: () => "auto",
+    setColorMode: async () => undefined,
+  });
+
+  assert.equal((await runtime.execute("/del"))?.tone, "error");
+  assert.equal((await runtime.execute("/del tax extra"))?.tone, "error");
+  assert.equal((await runtime.execute("/del pi"))?.title, "内置变量或常量 pi 不可删除");
+  assert.deepEqual(deleted, []);
+  assert.equal((await runtime.execute("/del missing"))?.title, "没有找到变量：missing");
+  assert.equal((await runtime.execute("/del TAX"))?.tone, "success");
+  assert.deepEqual(deleted, ["missing", "tax"]);
+  assert.equal(variables.has("tax"), false);
 });

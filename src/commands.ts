@@ -6,6 +6,7 @@ export type ColorMode = "auto" | "light" | "dark";
 
 export interface AppCommandActions {
   cleanHistory(): Promise<number>;
+  deleteVariable(name: string): Promise<boolean>;
   getColorMode(): ColorMode;
   setColorMode(mode: ColorMode): Promise<void>;
 }
@@ -111,6 +112,7 @@ export function createCommandRuntime(
   i18n = createI18n(),
   actions: AppCommandActions = {
     cleanHistory: async () => 0,
+    deleteVariable: async () => false,
     getColorMode: () => "auto",
     setColorMode: async () => undefined,
   },
@@ -179,6 +181,31 @@ export function createCommandRuntime(
   });
 
   commands.register({
+    name: "del",
+    summary: i18n.t("deleteSummary"),
+    usage: i18n.t("deleteUsage"),
+    execute: async ({ args }) => {
+      if (args.length !== 1) {
+        return errorResult(i18n.t("deleteArgumentsInvalid"), [
+          i18n.t("usageLine", { usage: i18n.t("deleteUsage") }),
+        ]);
+      }
+      const name = args[0]?.toLowerCase() ?? "";
+      if (isBuiltinVariable(name)) {
+        return errorResult(i18n.t("deleteBuiltinDenied", { name }), []);
+      }
+      if (!(await actions.deleteVariable(name))) {
+        return errorResult(i18n.t("deleteNotFound", { name }), []);
+      }
+      return {
+        title: i18n.t("deleteTitle"),
+        lines: [i18n.t("deleteRemoved", { name })],
+        tone: "success",
+      };
+    },
+  });
+
+  commands.register({
     name: "color",
     summary: i18n.t("colorSummary"),
     usage: i18n.t("colorUsage"),
@@ -214,6 +241,10 @@ export function createCommandRuntime(
 
 function isColorMode(value: string | undefined): value is ColorMode {
   return value === "auto" || value === "light" || value === "dark";
+}
+
+function isBuiltinVariable(name: string): boolean {
+  return ["pi", "e", "res", "tmstamp", "tmlocal", "tmutc"].includes(name);
 }
 
 function colorModeLabel(mode: ColorMode, i18n: I18n): string {

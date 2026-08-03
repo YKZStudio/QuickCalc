@@ -11,6 +11,11 @@ import {
   type CompletionSuggestion,
 } from "./completion.ts";
 import { createI18n } from "./i18n.ts";
+import {
+  createHistoryNavigationState,
+  navigateHistory,
+  type HistoryNavigationState,
+} from "./history-navigation.ts";
 import { normalizeExpressionInput } from "./input-normalization.ts";
 import { resolveSubmission } from "./submission.ts";
 import "./styles.css";
@@ -43,6 +48,7 @@ interface EvaluationResponse {
   display: string;
   value: number | null;
   assignedVariable: string | null;
+  error: string | null;
   historyEntry: HistoryEntry;
 }
 
@@ -171,6 +177,7 @@ const titlebar = requireElement<HTMLElement>(".titlebar");
 const sidePanel = requireElement<HTMLElement>(".side-panel");
 const commandRuntime = createCommandRuntime(i18n, {
   cleanHistory,
+  deleteVariable,
   getColorMode: () => snapshot.settings.colorMode,
   setColorMode,
 });
@@ -195,6 +202,7 @@ let composing = false;
 let toastTimer: number | undefined;
 let completionSuggestions: CompletionSuggestion[] = [];
 let activeCompletionIndex = 0;
+let historyNavigation: HistoryNavigationState = createHistoryNavigationState();
 let resizeFrame = 0;
 let resizeGeneration = 0;
 
@@ -248,23 +256,28 @@ function escapeHtml(value: string): string {
 function renderSnapshot(): void {
   hotkeyHint.textContent = formatHotkey(snapshot.settings.hotkey);
   const now = new Date();
-  const variableEntries: Array<[string, string]> = [
-    ["pi", String(Math.PI)],
-    ["e", String(Math.E)],
-    ["res", String(snapshot.res)],
-    ["tmstamp", String(Math.floor(now.getTime() / 1000))],
-    ["tmlocal", formatDateTime(now)],
-    ["tmutc", formatDateTime(now, true)],
+  const variableEntries: Array<[string, string, boolean]> = [
+    ["pi", String(Math.PI), false],
+    ["e", String(Math.E), false],
+    ["res", String(snapshot.res), false],
+    ["tmstamp", String(Math.floor(now.getTime() / 1000)), false],
+    ["tmlocal", formatDateTime(now), false],
+    ["tmutc", formatDateTime(now, true), false],
     ...Object.keys(snapshot.variables)
       .sort()
-      .map((name): [string, string] => [name, String(snapshot.variables[name])]),
+      .map((name): [string, string, boolean] => [name, String(snapshot.variables[name]), true]),
   ];
   variablesList.innerHTML = variableEntries
     .map(
-      ([name, value]) => `
+      ([name, value, canDelete]) => `
         <div class="variable-row">
           <span>${escapeHtml(name)}</span>
-          <span title="${escapeHtml(value)}">${escapeHtml(value)}</span>
+          <span class="variable-value" title="${escapeHtml(value)}">${escapeHtml(value)}</span>
+          ${
+            canDelete
+              ? `<button class="variable-delete" type="button" data-delete-variable="${escapeHtml(name)}" title="${escapeHtml(i18n.t("deleteVariableTitle", { name }))}" aria-label="${escapeHtml(i18n.t("deleteVariableTitle", { name }))}"><i class="ph ph-trash" aria-hidden="true"></i></button>`
+              : ""
+          }
         </div>
       `,
     )
@@ -455,6 +468,7 @@ function acceptCompletion(index = activeCompletionIndex): boolean {
   const edit = applyCompletion(input.value, suggestion);
   input.value = edit.value;
   input.setSelectionRange(edit.cursor, edit.cursor);
+  historyNavigation = createHistoryNavigationState();
   readyToCopy = false;
   refreshCompletions();
   return true;
@@ -532,18 +546,23 @@ async function evaluateCurrentExpression(expression: string): Promise<void> {
       snapshot.variables[response.assignedVariable] = response.value;
     }
     lastSubmittedExpression = response.expression;
-    lastDisplay = response.display;
-    readyToCopy = true;
-    showStatus(
-      response.assignedVariable
-        ? i18n.t("variableSaved", { name: response.assignedVariable })
-        : i18n.t("resultReady"),
-      "success",
-    );
+    lastDisplay = response.error ? null : response.display;
+    readyToCopy = response.error === null;
+    if (response.error) {
+      showStatus(response.error, "error");
+    } else {
+      showStatus(
+        response.assignedVariable
+          ? i18n.t("variableSaved", { name: response.assignedVariable })
+          : i18n.t("resultReady"),
+        "success",
+      );
+    }
     renderSnapshot();
   } catch (error) {
     lastDisplay = null;
     readyToCopy = false;
+    showNumericResult(String(error));
     showStatus(String(error), "error");
   } finally {
     busy = false;
@@ -577,6 +596,17 @@ async function cleanHistory(): Promise<number> {
   return removed;
 }
 
+async function deleteVariable(name: string): Promise<boolean> {
+  const deleted = isTauriRuntime
+    ? await invoke<boolean>("delete_variable", { name })
+    : Object.hasOwn(snapshot.variables, name);
+  if (deleted) {
+    delete snapshot.variables[name];
+    renderSnapshot();
+  }
+  return deleted;
+}
+
 async function setColorMode(mode: ColorMode): Promise<void> {
   if (isTauriRuntime) {
     await invoke<ColorMode>("set_color_mode", { mode });
@@ -598,6 +628,7 @@ form.addEventListener("submit", (event) => {
     return;
   }
 
+  historyNavigation = createHistoryNavigationState();
   input.value = "";
   dismissCompletions();
   if (action.kind === "command") {
@@ -631,6 +662,7 @@ input.addEventListener("compositionend", () => {
 });
 
 input.addEventListener("input", () => {
+  historyNavigation = createHistoryNavigationState();
   if (!composing) {
     normalizeCurrentInput();
   }
@@ -648,6 +680,7 @@ input.addEventListener("keydown", (event) => {
   }
 
   if (
+    event.altKey &&
     (event.key === "ArrowDown" || event.key === "ArrowUp") &&
     completionSuggestions.length > 0
   ) {
@@ -658,6 +691,24 @@ input.addEventListener("keydown", (event) => {
       completionSuggestions.length;
     renderCompletions();
     return;
+  }
+
+  if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+    const navigation = navigateHistory(
+      input.value,
+      snapshot.history.map((entry) => entry.expression),
+      event.key === "ArrowUp" ? "older" : "newer",
+      historyNavigation,
+    );
+    if (navigation) {
+      event.preventDefault();
+      historyNavigation = navigation.state;
+      input.value = navigation.value;
+      input.setSelectionRange(input.value.length, input.value.length);
+      readyToCopy = false;
+      dismissCompletions();
+      return;
+    }
   }
 
   if (event.key === "Escape") {
@@ -679,6 +730,7 @@ input.addEventListener("keydown", (event) => {
   event.preventDefault();
   input.value = edit.value;
   input.setSelectionRange(edit.cursor, edit.cursor);
+  historyNavigation = createHistoryNavigationState();
   readyToCopy = false;
   refreshCompletions();
 });
@@ -699,6 +751,7 @@ historyList.addEventListener("click", (event) => {
     return;
   }
   input.value = target.dataset.expression ?? "";
+  historyNavigation = createHistoryNavigationState();
   input.focus();
   input.setSelectionRange(input.value.length, input.value.length);
   readyToCopy = false;
@@ -707,6 +760,17 @@ historyList.addEventListener("click", (event) => {
 
 quitButton.addEventListener("click", () => {
   void invoke("quit_app");
+});
+
+variablesList.addEventListener("click", (event) => {
+  const target = (event.target as HTMLElement).closest<HTMLButtonElement>(
+    "[data-delete-variable]",
+  );
+  const name = target?.dataset.deleteVariable;
+  if (!name) {
+    return;
+  }
+  void executeCurrentCommand(`/del ${name}`);
 });
 
 hideButton.addEventListener("click", () => {
@@ -718,6 +782,7 @@ if (isTauriRuntime) {
     if (focused) {
       window.setTimeout(() => {
         input.value = "";
+        historyNavigation = createHistoryNavigationState();
         lastSubmittedExpression = "";
         readyToCopy = false;
         dismissCompletions();

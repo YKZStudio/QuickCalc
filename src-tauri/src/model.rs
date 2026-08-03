@@ -93,6 +93,15 @@ impl RuntimeData {
         }
         self
     }
+
+    pub fn delete_user_variable(&mut self, name: &str) -> bool {
+        let normalized = name.trim().to_ascii_lowercase();
+        if is_builtin(&normalized) {
+            return false;
+        }
+        self.variable_kinds.remove(&normalized);
+        self.variables.remove(&normalized).is_some()
+    }
 }
 
 pub fn is_builtin(name: &str) -> bool {
@@ -104,7 +113,7 @@ pub fn is_builtin(name: &str) -> bool {
 
 #[cfg(test)]
 mod tests {
-    use super::{ColorMode, RuntimeData, Settings, HISTORY_LIMIT};
+    use super::{ColorMode, RuntimeData, Settings, ValueKind, HISTORY_LIMIT};
 
     #[test]
     fn settings_migrate_to_the_current_history_limit_and_default_color_mode() {
@@ -133,6 +142,20 @@ mod tests {
 
         assert_eq!(runtime.normalize().history.len(), HISTORY_LIMIT);
     }
+
+    #[test]
+    fn runtime_deletes_user_variables_and_their_kinds_but_not_builtins() {
+        let mut runtime = RuntimeData::default();
+        runtime.variables.insert("tax".to_owned(), 0.09);
+        runtime
+            .variable_kinds
+            .insert("tax".to_owned(), ValueKind::Number);
+
+        assert!(!runtime.delete_user_variable("pi"));
+        assert!(runtime.delete_user_variable("TAX"));
+        assert!(!runtime.variables.contains_key("tax"));
+        assert!(!runtime.variable_kinds.contains_key("tax"));
+    }
 }
 
 #[derive(Debug, Clone, Serialize)]
@@ -151,5 +174,6 @@ pub struct EvaluationResponse {
     pub display: String,
     pub value: Option<f64>,
     pub assigned_variable: Option<String>,
+    pub error: Option<String>,
     pub history_entry: HistoryEntry,
 }
