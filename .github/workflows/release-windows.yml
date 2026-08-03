@@ -77,7 +77,19 @@ jobs:
         shell: pwsh
         env:
           QUICKCALC_CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
+          QUICKCALC_TIMESTAMP_URLS: https://timestamp.digicert.com;https://timestamp.sectigo.com
         run: npm run tauri build -- --target ${{ matrix.target }} --bundles nsis,msi
+
+      - name: Show signing diagnostics
+        if: always()
+        shell: pwsh
+        run: |
+          $diagnosticPath = Join-Path $env:GITHUB_WORKSPACE "cert\signing.log"
+          if (Test-Path -LiteralPath $diagnosticPath -PathType Leaf) {
+            Get-Content -LiteralPath $diagnosticPath
+          } else {
+            Write-Host "No signing diagnostic file was produced."
+          }
 
       - name: Upload installers
         uses: actions/upload-artifact@v4

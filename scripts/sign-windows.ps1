@@ -7,6 +7,16 @@ $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
 $repoRoot = Split-Path -Parent $PSScriptRoot
+$diagnosticPath = Join-Path $repoRoot "cert\signing.log"
+
+function Write-SigningDiagnostic {
+    param([Parameter(Mandatory = $true)][string]$Message)
+
+    $timestamp = (Get-Date).ToUniversalTime().ToString("o")
+    $line = "[$timestamp] $Message"
+    Write-Host $line
+    Add-Content -LiteralPath $diagnosticPath -Value $line
+}
 
 function Resolve-ConfiguredPath {
     param(
@@ -91,27 +101,56 @@ if (-not $certificate.HasPrivateKey) {
 $certificate.Dispose()
 
 $signTool = Find-SignTool
-$signArguments = @(
+$baseSignArguments = @(
     "sign",
     "/fd", "SHA256",
     "/f", $certificatePath,
     "/p", $certificatePassword
 )
 
-$timestampUrl = [Environment]::GetEnvironmentVariable("QUICKCALC_TIMESTAMP_URL")
-if ([string]::IsNullOrWhiteSpace($timestampUrl)) {
-    $timestampUrl = "http://timestamp.digicert.com"
-}
-if ($timestampUrl -ne "none") {
-    $signArguments += @("/tr", $timestampUrl, "/td", "SHA256")
+function Invoke-SignTool {
+    param(
+        [Parameter(Mandatory = $true)][string[]]$Arguments,
+        [Parameter(Mandatory = $true)][string]$Description
+    )
+
+    Write-SigningDiagnostic "Signing $([System.IO.Path]::GetFileName($resolvedTarget)): $Description"
+    $commandArguments = @($Arguments) + $resolvedTarget
+    $signOutput = & $signTool @commandArguments 2>&1
+    $exitCode = $LASTEXITCODE
+    foreach ($line in @($signOutput)) {
+        Write-SigningDiagnostic ([string]$line)
+    }
+    return $exitCode -eq 0
 }
 
-$signArguments += $resolvedTarget
+$configuredTimestampUrls = [Environment]::GetEnvironmentVariable("QUICKCALC_TIMESTAMP_URLS")
+if ([string]::IsNullOrWhiteSpace($configuredTimestampUrls)) {
+    $configuredTimestampUrls = "https://timestamp.digicert.com;https://timestamp.sectigo.com"
+}
+$timestampUrls = $configuredTimestampUrls.Split(";", [System.StringSplitOptions]::RemoveEmptyEntries) |
+    ForEach-Object { $_.Trim() }
 
-Write-Host "Signing $([System.IO.Path]::GetFileName($resolvedTarget)) with SHA-256..."
-& $signTool @signArguments
-if ($LASTEXITCODE -ne 0) {
-    throw "signtool.exe failed with exit code $LASTEXITCODE while signing $resolvedTarget"
+$signed = $false
+if ($timestampUrls.Count -eq 1 -and $timestampUrls[0] -eq "none") {
+    $signed = Invoke-SignTool -Arguments $baseSignArguments -Description "without timestamp (explicitly configured)"
+} else {
+    foreach ($timestampUrl in $timestampUrls) {
+        $timestampArguments = $baseSignArguments + @("/tr", $timestampUrl, "/td", "SHA256")
+        if (Invoke-SignTool -Arguments $timestampArguments -Description "with RFC3161 timestamp $timestampUrl") {
+            $signed = $true
+            break
+        }
+        Write-SigningDiagnostic "Timestamp endpoint failed: $timestampUrl"
+    }
+}
+
+if (-not $signed) {
+    Write-SigningDiagnostic "All configured timestamp endpoints failed; retrying the signed build without a timestamp."
+    $signed = Invoke-SignTool -Arguments $baseSignArguments -Description "without timestamp fallback"
+}
+if (-not $signed) {
+    throw "signtool.exe failed; inspect cert/signing.log for the complete diagnostic output."
 }
 
 $signature = Get-AuthenticodeSignature -LiteralPath $resolvedTarget
@@ -119,4 +158,4 @@ if ($null -eq $signature.SignerCertificate -or $signature.Status -eq "NotSigned"
     throw "The Authenticode signature check failed for $resolvedTarget (status: $($signature.Status))."
 }
 
-Write-Host "Signed $([System.IO.Path]::GetFileName($resolvedTarget)); signer: $($signature.SignerCertificate.Subject)"
+Write-SigningDiagnostic "Signed $([System.IO.Path]::GetFileName($resolvedTarget)); signer: $($signature.SignerCertificate.Subject)"
