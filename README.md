@@ -4,7 +4,7 @@
 
 QuickCalc 是一款以键盘为中心的快速桌面计算器。默认按 `Ctrl + Shift + Space` 呼出，再按一次隐藏；窗口始终置顶、无边框，并在失去焦点时自动隐藏。
 
-当前版本为 **v0.2.2**：加入设置页（快捷键、自启动、失焦隐藏、精度、显示字体和 GitHub 更新检查）、历史搜索、单实例唤起与插件目录清单校验；Windows 构建支持使用 PFX 自动签名，发行版由维护者手动发布。
+当前版本为 **v0.2.2**：加入设置页（快捷键、自启动、失焦隐藏、精度、显示字体和 GitHub 更新检查）、历史搜索、单实例唤起与插件目录清单校验；Windows 安装包由 GitHub Actions 构建，再由维护者手动发布。
 
 ## 设计目标
 
@@ -107,7 +107,7 @@ cd src-tauri && cargo test
 
 ## Windows 发布
 
-推送与应用版本一致的 `v<semver>` 标签后，GitHub Actions 会自动构建 Windows x64 NSIS `.exe` 与 MSI，对主程序及安装程序签名后发布到 GitHub Releases。PFX 的本地环境变量和 GitHub Secrets 配置见 [发布说明](docs/RELEASE.md)。
+推送到 `main` 或手动触发工作流后，GitHub Actions 会构建未签名的 Windows x64/ARM64 NSIS `.exe` 与 MSI，并作为 Actions artifacts 上传。维护者下载并验证产物后，再手动发布到 GitHub Releases；具体步骤见 [发布说明](docs/RELEASE.md)。
 
 ## 技术选型
 

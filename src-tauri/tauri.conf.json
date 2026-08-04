@@ -46,21 +46,6 @@
     ],
     "category": "Utility",
     "shortDescription": "A fast, keyboard-first desktop calculator",
-    "longDescription": "QuickCalc is a lightweight global-hotkey calculator for Windows, macOS and Linux.",
-    "windows": {
-      "digestAlgorithm": "sha256",
-      "signCommand": {
-        "cmd": "powershell.exe",
-        "args": [
-          "-NoProfile",
-          "-NonInteractive",
-          "-ExecutionPolicy",
-          "Bypass",
-          "-File",
-          "../scripts/sign-windows.ps1",
-          "%1"
-        ]
-      }
-    }
+    "longDescription": "QuickCalc is a lightweight global-hotkey calculator for Windows, macOS and Linux."
   }
 }
