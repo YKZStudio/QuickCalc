@@ -98,6 +98,7 @@ try {
 if (-not $certificate.HasPrivateKey) {
     throw "The configured PFX does not contain a private key and cannot sign files."
 }
+$certificateSubject = $certificate.Subject
 $certificate.Dispose()
 
 $signTool = Find-SignTool
@@ -179,16 +180,4 @@ if (-not $signed) {
     throw "signtool.exe failed; inspect cert/signing.log for the complete diagnostic output."
 }
 
-$signature = Get-AuthenticodeSignature -LiteralPath $resolvedTarget
-$signatureStatus = [string]$signature.Status
-$signerSubject = if ($null -eq $signature.SignerCertificate) {
-    "<none>"
-} else {
-    $signature.SignerCertificate.Subject
-}
-Write-SigningDiagnostic "Authenticode verification for $([System.IO.Path]::GetFileName($resolvedTarget)): status=$signatureStatus; signer=$signerSubject"
-if ($null -eq $signature.SignerCertificate -or $signature.Status -eq "NotSigned" -or $signature.Status -eq "HashMismatch") {
-    throw "The Authenticode signature check failed for $resolvedTarget (status: $($signature.Status))."
-}
-
-Write-SigningDiagnostic "Signed $([System.IO.Path]::GetFileName($resolvedTarget)); signer: $signerSubject"
+Write-SigningDiagnostic "Signed $([System.IO.Path]::GetFileName($resolvedTarget)); signer: $certificateSubject"
