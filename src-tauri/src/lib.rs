@@ -158,6 +158,7 @@ pub fn run() {
             commands::clean_history,
             commands::delete_variable,
             commands::set_color_mode,
+            commands::complete_onboarding,
             commands::update_settings,
             commands::list_plugins,
             commands::evaluate_expression,

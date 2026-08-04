@@ -74,6 +74,8 @@ test("cleans history and persists color modes through application actions", asyn
     setColorMode: async (mode) => {
       colorMode = mode;
     },
+    hideWindow: async () => undefined,
+    shutdown: async () => undefined,
   });
 
   assert.equal((await runtime.execute("/clean"))?.lines[0], "已清空 7 条历史记录。");
@@ -97,6 +99,8 @@ test("deletes user variables while protecting built-ins", async () => {
     },
     getColorMode: () => "auto",
     setColorMode: async () => undefined,
+    hideWindow: async () => undefined,
+    shutdown: async () => undefined,
   });
 
   assert.equal((await runtime.execute("/del"))?.tone, "error");
@@ -107,4 +111,25 @@ test("deletes user variables while protecting built-ins", async () => {
   assert.equal((await runtime.execute("/del TAX"))?.tone, "success");
   assert.deepEqual(deleted, ["missing", "tax"]);
   assert.equal(variables.has("tax"), false);
+});
+
+test("hides or shuts down the application through lifecycle commands", async () => {
+  let hideCalls = 0;
+  let shutdownCalls = 0;
+  const runtime = createCommandRuntime(createI18n("zh-CN"), {
+    cleanHistory: async () => 0,
+    deleteVariable: async () => false,
+    getColorMode: () => "auto",
+    setColorMode: async () => undefined,
+    hideWindow: async () => { hideCalls += 1; },
+    shutdown: async () => { shutdownCalls += 1; },
+  });
+
+  assert.equal((await runtime.execute("/exit"))?.tone, "success");
+  assert.equal((await runtime.execute("/quit"))?.tone, "success");
+  assert.equal(hideCalls, 2);
+  assert.equal((await runtime.execute("/shutdown"))?.tone, "success");
+  assert.equal(shutdownCalls, 1);
+  assert.equal((await runtime.execute("/exit later"))?.tone, "error");
+  assert.equal((await runtime.execute("/shutdown now"))?.tone, "error");
 });

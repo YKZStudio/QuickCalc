@@ -2,6 +2,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { LogicalSize } from "@tauri-apps/api/dpi";
 import { currentMonitor, getCurrentWindow } from "@tauri-apps/api/window";
 import { writeText } from "@tauri-apps/plugin-clipboard-manager";
+import packageMetadata from "../package.json";
 import { applyBracketKey, completeTrailingBrackets } from "./brackets.ts";
 import { createCommandRuntime, type ColorMode, type CommandResult } from "./commands.ts";
 import {
@@ -29,6 +30,7 @@ interface Settings {
   precision: number;
   fontFamily: string;
   autoUpdate: boolean;
+  onboardingCompleted: boolean;
 }
 
 interface HistoryEntry {
@@ -56,6 +58,8 @@ interface EvaluationResponse {
 }
 
 const i18n = createI18n();
+const APP_VERSION = `v${packageMetadata.version}`;
+const ONBOARDING_STORAGE_KEY = `quickcalc:onboarding:${APP_VERSION}`;
 const isTauriRuntime = "__TAURI_INTERNALS__" in window;
 const previewParameters = new URLSearchParams(window.location.search);
 const previewTheme = previewParameters.get("theme");
@@ -146,7 +150,10 @@ root.innerHTML = `
       <aside class="side-panel" aria-label="${escapeHtml(i18n.t("recentHistory"))}">
         <div class="side-heading">
           <span>${escapeHtml(i18n.t("recentCalculations"))}</span>
-          <span id="history-count" class="count">0 / 100</span>
+          <div class="history-heading-actions">
+            <span id="history-count" class="count">0 / 100</span>
+            <button id="history-toggle" class="history-toggle" type="button" title="${escapeHtml(i18n.t("hideHistoryTitle"))}" aria-label="${escapeHtml(i18n.t("hideHistoryTitle"))}" aria-expanded="true"><i class="ph ph-caret-right" aria-hidden="true"></i></button>
+          </div>
         </div>
         <label class="history-search"><span class="sr-only">搜索历史</span><input id="history-search" type="search" placeholder="搜索历史…" /></label>
         <ol id="history" class="history"></ol>
@@ -156,6 +163,9 @@ root.innerHTML = `
           <span>${escapeHtml(i18n.t("localAutoSave"))}</span>
         </div>
       </aside>
+      <div class="history-rail" aria-label="${escapeHtml(i18n.t("recentHistory"))}">
+        <button id="history-show" class="history-toggle" type="button" title="${escapeHtml(i18n.t("showHistoryTitle"))}" aria-label="${escapeHtml(i18n.t("showHistoryTitle"))}" aria-expanded="false"><i class="ph ph-caret-left" aria-hidden="true"></i></button>
+      </div>
     </div>
     <div id="settings-modal" class="settings-modal" hidden>
       <section class="settings-card" role="dialog" aria-modal="true" aria-label="设置">
@@ -171,6 +181,19 @@ root.innerHTML = `
           <p id="update-status" class="settings-note">自动从 GitHub Releases 检查新版。</p>
           <footer><button id="settings-cancel" type="button">取消</button><button type="submit" class="settings-save">保存设置</button></footer>
         </form>
+      </section>
+    </div>
+    <div id="onboarding-modal" class="onboarding-modal" hidden>
+      <section class="onboarding-card" role="dialog" aria-modal="true" aria-labelledby="onboarding-title">
+        <i class="ph-fill ph-calculator onboarding-icon" aria-hidden="true"></i>
+        <h1 id="onboarding-title">${escapeHtml(i18n.t("onboardingTitle"))}</h1>
+        <p>${escapeHtml(i18n.t("onboardingDescription"))}</p>
+        <ol>
+          <li>${escapeHtml(i18n.t("onboardingStepHotkey", { hotkey: formatHotkey("Ctrl+Shift+Space") }))}</li>
+          <li>${escapeHtml(i18n.t("onboardingStepCalculate"))}</li>
+          <li>${escapeHtml(i18n.t("onboardingStepCommands"))}</li>
+        </ol>
+        <button id="onboarding-start" type="button">${escapeHtml(i18n.t("onboardingStart"))}</button>
       </section>
     </div>
   </section>
@@ -207,11 +230,17 @@ const historySearch = requireElement<HTMLInputElement>("#history-search");
 const hideButton = requireElement<HTMLButtonElement>("#hide-button");
 const titlebar = requireElement<HTMLElement>(".titlebar");
 const sidePanel = requireElement<HTMLElement>(".side-panel");
+const historyToggle = requireElement<HTMLButtonElement>("#history-toggle");
+const historyShow = requireElement<HTMLButtonElement>("#history-show");
+const onboardingModal = requireElement<HTMLElement>("#onboarding-modal");
+const onboardingStart = requireElement<HTMLButtonElement>("#onboarding-start");
 const commandRuntime = createCommandRuntime(i18n, {
   cleanHistory,
   deleteVariable,
   getColorMode: () => snapshot.settings.colorMode,
   setColorMode,
+  hideWindow,
+  shutdown: shutdownApp,
 });
 
 let snapshot: Snapshot = {
@@ -224,6 +253,7 @@ let snapshot: Snapshot = {
     precision: 12,
     fontFamily: "system",
     autoUpdate: true,
+    onboardingCompleted: false,
   },
   history: [],
   variables: {},
@@ -240,6 +270,8 @@ let activeCompletionIndex = 0;
 let historyNavigation: HistoryNavigationState = createHistoryNavigationState();
 let resizeFrame = 0;
 let resizeGeneration = 0;
+let lastFittedHeight: number | null = null;
+let historyCollapsed = false;
 
 function requireElement<T extends Element>(selector: string): T {
   const element = document.querySelector<T>(selector);
@@ -286,6 +318,22 @@ function applyFontFamily(fontFamily: string): void {
   );
 }
 
+function isOnboardingCompleted(): boolean {
+  try {
+    return snapshot.settings.onboardingCompleted || window.localStorage.getItem(ONBOARDING_STORAGE_KEY) === "true";
+  } catch {
+    return snapshot.settings.onboardingCompleted;
+  }
+}
+
+function rememberOnboardingCompletion(): void {
+  try {
+    window.localStorage.setItem(ONBOARDING_STORAGE_KEY, "true");
+  } catch {
+    // Local storage is an optional compatibility fallback; native settings still persist when available.
+  }
+}
+
 function escapeHtml(value: string): string {
   return value
     .replaceAll("&", "&amp;")
@@ -326,7 +374,6 @@ function renderSnapshot(): void {
     )
     .join("");
   historyCount.textContent = `${snapshot.history.length} / ${snapshot.settings.historyLimit}`;
-  emptyHistory.hidden = snapshot.history.length > 0;
 
   const query = historySearch.value.trim().toLocaleLowerCase();
   const visibleHistory = snapshot.history.filter((entry) =>
@@ -347,6 +394,7 @@ function renderSnapshot(): void {
       `,
     )
     .join("");
+  historyList.hidden = visibleHistory.length === 0;
   emptyHistory.hidden = visibleHistory.length > 0;
   queueWindowFit();
 }
@@ -382,7 +430,7 @@ async function checkForUpdates(): Promise<void> {
     if (!response.ok) throw new Error(`GitHub ${response.status}`);
     const release = await response.json() as { tag_name?: string; html_url?: string };
     const tag = release.tag_name ?? "";
-    const current = "v0.2.2";
+    const current = APP_VERSION;
     if (tag && tag !== current) {
       status.textContent = `发现新版本 ${tag}（当前 ${current}）。`;
       link.href = release.html_url ?? "https://github.com/YKZStudio/QuickCalc/releases/latest";
@@ -399,6 +447,19 @@ function queueWindowFit(): void {
   resizeFrame = window.requestAnimationFrame(() => void fitWindowToContent());
 }
 
+function measureWorkspaceContentHeight(): number {
+  // Grid items stretch to the window height by default, which makes scrollHeight unsuitable
+  // for deciding whether the window can shrink. Measure their intrinsic block size instead.
+  const calculatorAlignSelf = form.style.alignSelf;
+  const sidePanelAlignSelf = sidePanel.style.alignSelf;
+  form.style.alignSelf = "start";
+  sidePanel.style.alignSelf = "start";
+  const contentHeight = Math.max(form.scrollHeight, sidePanel.scrollHeight);
+  form.style.alignSelf = calculatorAlignSelf;
+  sidePanel.style.alignSelf = sidePanelAlignSelf;
+  return contentHeight;
+}
+
 async function fitWindowToContent(): Promise<void> {
   const generation = ++resizeGeneration;
   const appWindow = getCurrentWindow();
@@ -407,7 +468,7 @@ async function fitWindowToContent(): Promise<void> {
   const physicalPosition = await appWindow.outerPosition();
   const currentWidth = physicalSize.width / scaleFactor;
   const currentHeight = physicalSize.height / scaleFactor;
-  const contentHeight = titlebar.offsetHeight + Math.max(form.scrollHeight, sidePanel.scrollHeight) + 2;
+  const contentHeight = titlebar.offsetHeight + measureWorkspaceContentHeight() + 2;
   let targetHeight = Math.min(860, Math.max(460, Math.ceil(contentHeight)));
   const monitor = await currentMonitor();
   if (monitor) {
@@ -417,7 +478,11 @@ async function fitWindowToContent(): Promise<void> {
       12;
     targetHeight = Math.min(targetHeight, Math.max(460, availableBelow));
   }
-  if (targetHeight <= currentHeight + 1 || generation !== resizeGeneration) {
+  if (targetHeight === lastFittedHeight || generation !== resizeGeneration) {
+    return;
+  }
+  lastFittedHeight = targetHeight;
+  if (Math.abs(targetHeight - currentHeight) <= 1) {
     return;
   }
 
@@ -442,6 +507,26 @@ async function fitWindowToContent(): Promise<void> {
     }
   };
   window.requestAnimationFrame((timestamp) => void animate(timestamp));
+}
+
+async function setHistoryCollapsed(collapsed: boolean): Promise<void> {
+  if (historyCollapsed === collapsed) {
+    return;
+  }
+  historyCollapsed = collapsed;
+  root!.classList.toggle("history-collapsed", collapsed);
+  historyToggle.setAttribute("aria-expanded", String(!collapsed));
+  historyShow.setAttribute("aria-expanded", String(!collapsed));
+
+  if (isTauriRuntime) {
+    const appWindow = getCurrentWindow();
+    const scaleFactor = await appWindow.scaleFactor();
+    const physicalSize = await appWindow.innerSize();
+    await appWindow.setSize(new LogicalSize(collapsed ? 460 : 720, physicalSize.height / scaleFactor));
+  }
+  lastFittedHeight = null;
+  queueWindowFit();
+  input.focus();
 }
 
 function showStatus(message: string, kind: "idle" | "success" | "error" = "idle"): void {
@@ -674,7 +759,15 @@ async function copyLastResult(): Promise<void> {
 }
 
 async function hideWindow(): Promise<void> {
-  await invoke("hide_main_window");
+  if (isTauriRuntime) {
+    await invoke("hide_main_window");
+  }
+}
+
+async function shutdownApp(): Promise<void> {
+  if (isTauriRuntime) {
+    await invoke("quit_app");
+  }
 }
 
 interface PluginDescriptor { id: string; name: string; version: string; permissions: string[]; compatible: boolean; error: string | null; }
@@ -778,7 +871,10 @@ input.addEventListener("input", () => {
 });
 
 input.addEventListener("keydown", (event) => {
-  if (event.key === "Tab" && completionSuggestions.length > 0) {
+  if (
+    (event.key === "Tab" || (event.key === "Enter" && !composing && !event.isComposing)) &&
+    completionSuggestions.length > 0
+  ) {
     event.preventDefault();
     acceptCompletion();
     return;
@@ -864,7 +960,7 @@ historyList.addEventListener("click", (event) => {
 });
 
 quitButton.addEventListener("click", () => {
-  void invoke("quit_app");
+  void shutdownApp();
 });
 
 variablesList.addEventListener("click", (event) => {
@@ -880,6 +976,32 @@ variablesList.addEventListener("click", (event) => {
 
 hideButton.addEventListener("click", () => {
   void hideWindow();
+});
+
+historyToggle.addEventListener("click", () => { void setHistoryCollapsed(true); });
+historyShow.addEventListener("click", () => { void setHistoryCollapsed(false); });
+
+onboardingStart.addEventListener("click", () => {
+  if (onboardingStart.disabled) {
+    return;
+  }
+
+  // Do not leave the user trapped behind onboarding if a disk write is slow or fails.
+  onboardingStart.disabled = true;
+  onboardingModal.hidden = true;
+  snapshot.settings.onboardingCompleted = true;
+  rememberOnboardingCompletion();
+  input.focus();
+
+  const persistCompletion = async (): Promise<void> => {
+    if (!isTauriRuntime) {
+      return;
+    }
+    snapshot.settings = await invoke<Settings>("complete_onboarding");
+  };
+  // Older already-running app binaries do not expose this command. The local marker above
+  // keeps the completed state without surfacing that harmless compatibility mismatch.
+  void persistCompletion().catch(() => undefined);
 });
 
 settingsButton.addEventListener("click", openSettings);
@@ -971,11 +1093,17 @@ async function bootstrap(): Promise<void> {
     snapshot = await invoke<Snapshot>("get_snapshot");
     applyColorMode(snapshot.settings.colorMode);
     renderSnapshot();
+    snapshot.settings.onboardingCompleted = isOnboardingCompleted();
+    onboardingModal.hidden = snapshot.settings.onboardingCompleted;
     if (snapshot.history[0]) {
       showNumericResult(snapshot.history[0].result);
     }
     showStatus(i18n.t("waiting"));
-    input.focus();
+    if (snapshot.settings.onboardingCompleted) {
+      input.focus();
+    } else {
+      onboardingStart.focus();
+    }
   } catch (error) {
     showStatus(i18n.t("startupFailed", { error: String(error) }), "error");
   }

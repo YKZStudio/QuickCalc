@@ -9,6 +9,8 @@ export interface AppCommandActions {
   deleteVariable(name: string): Promise<boolean>;
   getColorMode(): ColorMode;
   setColorMode(mode: ColorMode): Promise<void>;
+  hideWindow(): Promise<void>;
+  shutdown(): Promise<void>;
 }
 
 export interface CommandResult {
@@ -115,6 +117,8 @@ export function createCommandRuntime(
     deleteVariable: async () => false,
     getColorMode: () => "auto",
     setColorMode: async () => undefined,
+    hideWindow: async () => undefined,
+    shutdown: async () => undefined,
   },
 ): CommandRuntime {
   const commands = new CommandRegistry(i18n);
@@ -177,6 +181,33 @@ export function createCommandRuntime(
         lines: [i18n.t("cleanRemoved", { count: removed })],
         tone: "success",
       };
+    },
+  });
+
+  commands.register({
+    name: "exit",
+    aliases: ["quit"],
+    summary: i18n.t("exitSummary"),
+    usage: i18n.t("exitUsage"),
+    execute: async ({ args }) => {
+      if (args.length > 0) {
+        return errorResult(i18n.t("exitTitle"), [i18n.t("usageLine", { usage: i18n.t("exitUsage") })]);
+      }
+      await actions.hideWindow();
+      return { title: i18n.t("exitTitle"), lines: [i18n.t("exitDone")], tone: "success" };
+    },
+  });
+
+  commands.register({
+    name: "shutdown",
+    summary: i18n.t("shutdownSummary"),
+    usage: i18n.t("shutdownUsage"),
+    execute: async ({ args }) => {
+      if (args.length > 0) {
+        return errorResult(i18n.t("shutdownSummary"), [i18n.t("usageLine", { usage: i18n.t("shutdownUsage") })]);
+      }
+      await actions.shutdown();
+      return { title: i18n.t("shutdownSummary"), lines: [], tone: "success" };
     },
   });
 

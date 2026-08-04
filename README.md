@@ -4,7 +4,7 @@
 
 QuickCalc 是一款以键盘为中心的快速桌面计算器。默认按 `Ctrl + Shift + Space` 呼出，再按一次隐藏；窗口始终置顶、无边框，并在失去焦点时自动隐藏。
 
-当前版本为 **v0.2.2**：加入设置页（快捷键、自启动、失焦隐藏、精度、显示字体和 GitHub 更新检查）、历史搜索、单实例唤起与插件目录清单校验；Windows 安装包由 GitHub Actions 构建，再由维护者手动发布。
+当前版本为 **v0.2.3**：首次使用引导、可收起的历史记录栏，以及 `/exit`、`/quit`（隐藏窗口）和 `/shutdown`（彻底退出）命令；Windows 安装包由 GitHub Actions 构建，再由维护者手动发布。
 
 ## 设计目标
 
@@ -29,7 +29,7 @@ QuickCalc 是一款以键盘为中心的快速桌面计算器。默认按 `Ctrl 
 - UTF-8 文本 Base64 编码，以及 Base64/ASCII 自动识别解码。
 - 变量、斜杠命令和点操作的输入补全；上/下键浏览表达式历史并保留当前未提交草稿。
 - 补全项左侧显示名称、右侧显示简短说明，例如 `pi — 圆周率`、`/color — 查看或修改界面颜色模式`。
-- `/help` 命令帮助、`/clean` 历史清理、`/del <变量名>` 用户变量删除、`/color` 主题切换与 `/plugin` 插件管理入口。
+- `/help` 命令帮助、`/clean` 历史清理、`/del <变量名>` 用户变量删除、`/color` 主题切换、`/exit`/`/quit` 隐藏窗口、`/shutdown` 彻底退出，以及 `/plugin` 插件管理入口。
 - 可注册命令的 `QuickCalcPlugin` 插件接口。
 - 用户变量赋值与列表垃圾桶快捷删除；内置只读变量 `pi`、`e`、`res`、`tmstamp`、`tmlocal`、`tmutc` 不可删除。
 - 圆括号、方括号、花括号自动补全并统一参与求值。
@@ -82,6 +82,8 @@ QuickCalc 启动时读取系统语言并自动选择：
 - `/clean`：清空本机保存的全部计算历史，不删除变量与 `res`。
 - `/del <变量名>`：删除一个用户变量；内置变量和常量不可删除。变量列表最右侧的红色垃圾桶按钮执行相同操作。
 - `/color`：查看当前颜色模式；`/color light`、`/color dark`、`/color auto` 分别切换亮色、暗色或跟随系统。
+- `/exit` 或 `/quit`：隐藏窗口并保持 QuickCalc 后台运行，可用全局快捷键重新呼出。
+- `/shutdown`：保存当前状态后彻底关闭 QuickCalc。
 - `/plugin` 或 `/plugin list`：列出已加载插件。
 - `/plugin enable <id>`、`/plugin disable <id>`、`/plugin remove <id>`：管理已由可信宿主加载的插件。
 

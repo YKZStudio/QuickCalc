@@ -64,6 +64,21 @@ pub fn set_color_mode(mode: ColorMode, state: State<'_, AppState>) -> Result<Col
 }
 
 #[tauri::command]
+pub fn complete_onboarding(state: State<'_, AppState>) -> Result<crate::model::Settings, String> {
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "The settings state lock is corrupted".to_owned())?;
+    if !settings.onboarding_completed {
+        let mut updated = settings.clone();
+        updated.onboarding_completed = true;
+        state.storage.save_settings(&updated)?;
+        *settings = updated;
+    }
+    Ok(settings.clone())
+}
+
+#[tauri::command]
 pub fn delete_variable(name: String, state: State<'_, AppState>) -> Result<bool, String> {
     let locale = state.locale;
     let normalized = name.trim().to_ascii_lowercase();

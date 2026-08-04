@@ -25,6 +25,7 @@ pub struct Settings {
     pub precision: u8,
     pub font_family: String,
     pub auto_update: bool,
+    pub onboarding_completed: bool,
 }
 
 impl Default for Settings {
@@ -38,6 +39,7 @@ impl Default for Settings {
             precision: 12,
             font_family: "system".to_owned(),
             auto_update: true,
+            onboarding_completed: false,
         }
     }
 }
@@ -135,6 +137,7 @@ mod tests {
 
         assert_eq!(settings.history_limit, HISTORY_LIMIT);
         assert_eq!(settings.color_mode, ColorMode::Auto);
+        assert!(!settings.onboarding_completed);
     }
 
     #[test]
