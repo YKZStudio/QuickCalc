@@ -152,7 +152,7 @@ function Invoke-SignTool {
 
 $configuredTimestampUrls = [Environment]::GetEnvironmentVariable("QUICKCALC_TIMESTAMP_URLS")
 if ([string]::IsNullOrWhiteSpace($configuredTimestampUrls)) {
-    $configuredTimestampUrls = "https://timestamp.digicert.com;https://timestamp.sectigo.com"
+    $configuredTimestampUrls = "http://timestamp.digicert.com;http://timestamp.sectigo.com"
 }
 $timestampUrls = $configuredTimestampUrls.Split(";", [System.StringSplitOptions]::RemoveEmptyEntries) |
     ForEach-Object { $_.Trim() }
@@ -180,8 +180,15 @@ if (-not $signed) {
 }
 
 $signature = Get-AuthenticodeSignature -LiteralPath $resolvedTarget
+$signatureStatus = [string]$signature.Status
+$signerSubject = if ($null -eq $signature.SignerCertificate) {
+    "<none>"
+} else {
+    $signature.SignerCertificate.Subject
+}
+Write-SigningDiagnostic "Authenticode verification for $([System.IO.Path]::GetFileName($resolvedTarget)): status=$signatureStatus; signer=$signerSubject"
 if ($null -eq $signature.SignerCertificate -or $signature.Status -eq "NotSigned" -or $signature.Status -eq "HashMismatch") {
     throw "The Authenticode signature check failed for $resolvedTarget (status: $($signature.Status))."
 }
 
-Write-SigningDiagnostic "Signed $([System.IO.Path]::GetFileName($resolvedTarget)); signer: $($signature.SignerCertificate.Subject)"
+Write-SigningDiagnostic "Signed $([System.IO.Path]::GetFileName($resolvedTarget)); signer: $signerSubject"

@@ -77,7 +77,7 @@ jobs:
         shell: pwsh
         env:
           QUICKCALC_CERT_PASSWORD: ${{ secrets.WINDOWS_CERTIFICATE_PASSWORD }}
-          QUICKCALC_TIMESTAMP_URLS: https://timestamp.digicert.com;https://timestamp.sectigo.com
+          QUICKCALC_TIMESTAMP_URLS: http://timestamp.digicert.com;http://timestamp.sectigo.com
         run: npm run tauri build -- --target ${{ matrix.target }} --bundles nsis,msi
 
       - name: Show signing diagnostics
