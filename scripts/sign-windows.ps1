@@ -118,16 +118,31 @@ function Invoke-SignTool {
     $commandArguments = @($Arguments) + $resolvedTarget
     # signtool writes ordinary failures to stderr. Do not let PowerShell turn that
     # native stderr into a terminating error before it can be recorded or retried.
+    # PSNativeCommandUseErrorActionPreference only exists in PowerShell 7.3 and
+    # newer, while Tauri deliberately invokes this script with Windows PowerShell
+    # 5.1 through powershell.exe. Access it through Get-Variable so StrictMode does
+    # not abort the signing process on Windows PowerShell.
     $previousErrorActionPreference = $ErrorActionPreference
-    $previousNativeCommandPreference = $PSNativeCommandUseErrorActionPreference
+    $nativeCommandPreference = Get-Variable -Name PSNativeCommandUseErrorActionPreference -ErrorAction SilentlyContinue
+    $previousNativeCommandPreference = $null
+    if ($null -ne $nativeCommandPreference) {
+        $previousNativeCommandPreference = $nativeCommandPreference.Value
+    }
     $ErrorActionPreference = "Continue"
-    $PSNativeCommandUseErrorActionPreference = $false
+    if ($null -ne $nativeCommandPreference) {
+        Set-Variable -Name PSNativeCommandUseErrorActionPreference -Value $false
+    }
     try {
         $signOutput = & $signTool @commandArguments 2>&1
         $exitCode = $LASTEXITCODE
+    } catch {
+        Write-SigningDiagnostic "signtool.exe could not be invoked: $($_.Exception.Message)"
+        throw
     } finally {
         $ErrorActionPreference = $previousErrorActionPreference
-        $PSNativeCommandUseErrorActionPreference = $previousNativeCommandPreference
+        if ($null -ne $nativeCommandPreference) {
+            Set-Variable -Name PSNativeCommandUseErrorActionPreference -Value $previousNativeCommandPreference
+        }
     }
     foreach ($line in @($signOutput)) {
         Write-SigningDiagnostic ([string]$line)
