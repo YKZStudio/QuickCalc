@@ -118,7 +118,11 @@ pub fn evaluate_expression(
     state: State<'_, AppState>,
 ) -> Result<EvaluationResponse, String> {
     let locale = state.locale;
-    let precision = state.settings.lock().map_err(|_| "The settings state lock is corrupted".to_owned())?.precision;
+    let precision = state
+        .settings
+        .lock()
+        .map_err(|_| "The settings state lock is corrupted".to_owned())?
+        .precision;
     let mut runtime = state.runtime.lock().map_err(|_| {
         locale
             .text(
@@ -230,12 +234,19 @@ pub fn update_settings(
     app: AppHandle,
     state: State<'_, AppState>,
 ) -> Result<crate::model::Settings, String> {
-    let mut settings = state.settings.lock().map_err(|_| "The settings state lock is corrupted".to_owned())?;
+    let mut settings = state
+        .settings
+        .lock()
+        .map_err(|_| "The settings state lock is corrupted".to_owned())?;
     let mut updated = settings.clone();
     let hotkey = hotkey.trim().to_owned();
-    if hotkey.is_empty() { return Err("快捷键不能为空".to_owned()); }
+    if hotkey.is_empty() {
+        return Err("快捷键不能为空".to_owned());
+    }
     if updated.hotkey != hotkey {
-        app.global_shortcut().unregister_all().map_err(|error| format!("无法释放旧快捷键：{error}"))?;
+        app.global_shortcut()
+            .unregister_all()
+            .map_err(|error| format!("无法释放旧快捷键：{error}"))?;
         if let Err(error) = app.global_shortcut().register(hotkey.as_str()) {
             let _ = app.global_shortcut().register(updated.hotkey.as_str());
             return Err(format!("无法注册快捷键 {hotkey}：{error}"));
@@ -248,8 +259,15 @@ pub fn update_settings(
     updated.font_family = font_family.trim().to_owned();
     updated.auto_update = auto_update;
     updated = updated.normalize();
-    if updated.autostart { app.autolaunch().enable().map_err(|error| format!("无法启用开机自启动：{error}"))?; }
-    else { app.autolaunch().disable().map_err(|error| format!("无法停用开机自启动：{error}"))?; }
+    if updated.autostart {
+        app.autolaunch()
+            .enable()
+            .map_err(|error| format!("无法启用开机自启动：{error}"))?;
+    } else {
+        app.autolaunch()
+            .disable()
+            .map_err(|error| format!("无法停用开机自启动：{error}"))?;
+    }
     state.storage.save_settings(&updated)?;
     *settings = updated.clone();
     Ok(updated)

@@ -1480,8 +1480,13 @@ mod tests {
     #[test]
     fn benchmark_ten_thousand_expressions() {
         let started = Instant::now();
-        for index in 1..=10_000 { evaluate(&format!("({index} * 1.08 + 42) / 3")).unwrap(); }
-        eprintln!("QuickCalc 10k expressions: {} ms", started.elapsed().as_millis());
+        for index in 1..=10_000 {
+            evaluate(&format!("({index} * 1.08 + 42) / 3")).unwrap();
+        }
+        eprintln!(
+            "QuickCalc 10k expressions: {} ms",
+            started.elapsed().as_millis()
+        );
     }
 
     #[test]
