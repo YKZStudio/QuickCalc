@@ -94,11 +94,24 @@ pub struct RuntimeData {
 impl RuntimeData {
     pub fn normalize(mut self) -> Self {
         self.history.truncate(HISTORY_LIMIT);
-        self.variables
-            .retain(|name, value| !is_builtin(name) && value.is_finite());
-        let variables = &self.variables;
+
+        let raw_variables = std::mem::take(&mut self.variables);
+        let raw_variable_kinds = std::mem::take(&mut self.variable_kinds);
+        for (name, value) in raw_variables {
+            let normalized = normalize_variable_name(&name);
+            if normalized.is_empty() || is_builtin(&normalized) || !value.is_finite() {
+                continue;
+            }
+            self.variables.insert(normalized.clone(), value);
+            if let Some(kind) = raw_variable_kinds.get(&name) {
+                self.variable_kinds.insert(normalized, *kind);
+            } else if let Some(kind) = raw_variable_kinds.get(&name.to_ascii_lowercase()) {
+                self.variable_kinds.insert(normalized, *kind);
+            }
+        }
+
         self.variable_kinds
-            .retain(|name, _| variables.contains_key(name));
+            .retain(|name, _| self.variables.contains_key(name));
         if !self.res.is_finite() {
             self.res = 0.0;
             self.res_kind = ValueKind::Number;
@@ -107,7 +120,7 @@ impl RuntimeData {
     }
 
     pub fn delete_user_variable(&mut self, name: &str) -> bool {
-        let normalized = name.trim().to_ascii_lowercase();
+        let normalized = normalize_variable_name(name);
         if is_builtin(&normalized) {
             return false;
         }
@@ -116,9 +129,13 @@ impl RuntimeData {
     }
 }
 
+fn normalize_variable_name(name: &str) -> String {
+    name.trim().to_ascii_lowercase()
+}
+
 pub fn is_builtin(name: &str) -> bool {
     matches!(
-        name.to_ascii_lowercase().as_str(),
+        normalize_variable_name(name).as_str(),
         "pi" | "e" | "res" | "tmstamp" | "tmlocal" | "tmutc"
     )
 }
@@ -168,6 +185,32 @@ mod tests {
         assert!(runtime.delete_user_variable("TAX"));
         assert!(!runtime.variables.contains_key("tax"));
         assert!(!runtime.variable_kinds.contains_key("tax"));
+    }
+
+    #[test]
+    fn runtime_normalizes_persisted_variable_names_and_kinds() {
+        let mut runtime = RuntimeData::default();
+        runtime.variables.insert(" TAX ".to_owned(), 0.09);
+        runtime.variables.insert("pi".to_owned(), 3.0);
+        runtime.variables.insert("bad".to_owned(), f64::NAN);
+        runtime
+            .variable_kinds
+            .insert(" TAX ".to_owned(), ValueKind::Duration);
+        runtime
+            .variable_kinds
+            .insert("orphan".to_owned(), ValueKind::Duration);
+
+        let runtime = runtime.normalize();
+
+        assert_eq!(runtime.variables.get("tax"), Some(&0.09));
+        assert_eq!(
+            runtime.variable_kinds.get("tax"),
+            Some(&ValueKind::Duration)
+        );
+        assert!(!runtime.variables.contains_key(" TAX "));
+        assert!(!runtime.variables.contains_key("pi"));
+        assert!(!runtime.variables.contains_key("bad"));
+        assert!(!runtime.variable_kinds.contains_key("orphan"));
     }
 }
 

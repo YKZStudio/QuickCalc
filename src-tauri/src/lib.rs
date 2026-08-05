@@ -71,7 +71,9 @@ pub fn run() {
         )
         .plugin(tauri_plugin_clipboard_manager::init())
         .plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
-            let Some(window) = app.get_webview_window("main") else { return; };
+            let Some(window) = app.get_webview_window("main") else {
+                return;
+            };
             let _ = window.show();
             let _ = window.set_focus();
         }))
